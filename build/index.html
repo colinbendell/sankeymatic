@@ -5,12 +5,26 @@
 <meta name="viewport" content="initial-scale=1">
 <title>SankeyMATIC: Build a Sankey Diagram</title>
 <link rel="stylesheet" href="build.css">
-<script defer src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js" crossorigin="anonymous"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/canvg@3/lib/umd.js" crossorigin="anonymous"></script>
-<script defer src="constants.js"></script>
-<script defer src="sankey.js"></script>
-<script defer src="lz-string.min.js"></script>
-<script defer src="sankeymatic.js"></script>
+<script type="importmap">
+  {
+    "imports": {
+      "sankey": "./sankey.js",
+      "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+      "canvg": "https://cdn.jsdelivr.net/npm/canvg@4/+esm",
+      "lz-string": "https://cdn.jsdelivr.net/npm/lz-string@1.5/+esm"
+    }
+  }
+</script>
+<script type="module" src="sankeymatic.js"></script>
+<script type="module">
+  import { loadFromQueryString } from "./sankeymatic.js";
+  window.addEventListener('load', () => {
+    // Load a diagram definition from the URL if there was one:
+    loadFromQueryString();
+    // Render the present inputs:
+    process_sankey();
+  });
+</script>
 <meta name="description" content="Make beautiful Sankey diagrams. Export them as images or SVG with this free data visualization tool." />
 <meta property="og:title" content="SankeyMATIC: Build a Sankey Diagram" />
 <meta property="og:type" content="website" />
