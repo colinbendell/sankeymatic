@@ -1,20 +1,20 @@
 // Test suite for TSV flow line parsing
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { reFlowLine } from './constantsProxy.mjs';
+import { LINE_FLOW_REGEX } from '../build/constants.js';
 
 /**
  * Test a single flow line against the regex
  * @param {string} input - The flow line to test
  * @param {Object} expected - Expected match groups
- * @param {string} expected.sourceNode - Expected source node
- * @param {string} expected.amount - Expected amount
- * @param {string} expected.targetNode - Expected target node
+ * @param {string} expected.source - Expected source node
+ * @param {string} expected.value - Expected value
+ * @param {string} expected.target - Expected target node
  * @param {string} [expected.color] - Expected color (without #)
  * @param {string} [expected.opacity] - Expected opacity
  */
 function testFlowLine(input, expected) {
-  const match = input.match(reFlowLine);
+  const match = input.match(LINE_FLOW_REGEX);
 
   if (!match) {
     throw new Error(`Input did not match regex: ${JSON.stringify(input)}`);
@@ -23,9 +23,9 @@ function testFlowLine(input, expected) {
   const { groups } = match;
 
   // Check required groups
-  assert.strictEqual(groups.sourceNode, expected.sourceNode, `Source node mismatch for: ${input} (groups: ${JSON.stringify(groups)})`);
-  assert.strictEqual(groups.amount, expected.amount, `Amount mismatch for: ${input} (groups: ${JSON.stringify(groups)})`);
-  assert.strictEqual(groups.targetNode, expected.targetNode, `Target node mismatch for: ${input} (groups: ${JSON.stringify(groups)})`);
+  assert.strictEqual(groups.source, expected.source, `Source node mismatch for: ${input} (groups: ${JSON.stringify(groups)})`);
+  assert.strictEqual(groups.value, expected.value, `value mismatch for: ${input} (groups: ${JSON.stringify(groups)})`);
+  assert.strictEqual(groups.target, expected.target, `Target node mismatch for: ${input} (groups: ${JSON.stringify(groups)})`);
 
   // Check optional groups
   if ('color' in expected) {
@@ -44,9 +44,9 @@ function testFlowLine(input, expected) {
 describe('Flow Line Parser', () => {
   it('should parse basic flow line', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: '100',
-      targetNode: 'Target'
+      source: 'Source',
+      value: '100',
+      target: 'Target'
     };
     testFlowLine('Source[100]Target', expected);
     testFlowLine(' Source [ 100 ] Target', expected);
@@ -55,9 +55,9 @@ describe('Flow Line Parser', () => {
 
   it('should parse with color', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: '100',
-      targetNode: 'Target',
+      source: 'Source',
+      value: '100',
+      target: 'Target',
       color: 'ff0000'
     };
     testFlowLine('Source[100]Target #ff0000', expected);
@@ -67,9 +67,9 @@ describe('Flow Line Parser', () => {
 
   it('should parse with color and opacity', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: '100',
-      targetNode: 'Target',
+      source: 'Source',
+      value: '100',
+      target: 'Target',
       color: 'ff0000',
       opacity: '.75'
     };
@@ -80,9 +80,9 @@ describe('Flow Line Parser', () => {
 
   it('should handle 3-digit hex colors', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: '100',
-      targetNode: 'Target',
+      source: 'Source',
+      value: '100',
+      target: 'Target',
       color: 'f00'
     };
     testFlowLine('Source[100]Target #f00', expected);
@@ -90,11 +90,11 @@ describe('Flow Line Parser', () => {
     testFlowLine('  Source  [  100  ]  Target  \t  #f00  ', expected);
   });
 
-    it('should parse with just opacity', () => {
+  it('should parse with just opacity', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: '100',
-      targetNode: 'Target',
+      source: 'Source',
+      value: '100',
+      target: 'Target',
       opacity: '.75'
     };
     testFlowLine('Source[100]Target #.75', expected);
@@ -102,11 +102,11 @@ describe('Flow Line Parser', () => {
     testFlowLine('  Source  [  100  ]  Target  \t  #.75  ', expected);
   });
 
-  it('should handle empty amount', () => {
+  it('should handle empty value', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: '',
-      targetNode: 'Target'
+      source: 'Source',
+      value: '',
+      target: 'Target'
     };
     testFlowLine('Source[]Target', expected);
     testFlowLine('  Source[]Target', expected);
@@ -115,9 +115,9 @@ describe('Flow Line Parser', () => {
 
   it('should handle empty target for when target and amaount are flipped', () => {
     const expected = {
-      sourceNode: 'Source',
-      amount: 'Target',
-      targetNode: ''
+      source: 'Source',
+      value: 'Target',
+      target: ''
     };
     testFlowLine('Source[Target]', expected);
     testFlowLine('Source[Target]#fff', expected);
@@ -138,7 +138,7 @@ describe('Flow Line Parser', () => {
 
     testCases.forEach(({ input, valid }) => {
       const line = `Source[100]Target #${input}`;
-      const match = line.match(reFlowLine);
+      const match = line.match(LINE_FLOW_REGEX);
 
       if (valid) {
         assert(match, `Should match: ${line}`);
@@ -159,7 +159,7 @@ describe('Flow Line Parser', () => {
     ];
 
     invalidLines.forEach(line => {
-      const match = line.match(reFlowLine);
+      const match = line.match(LINE_FLOW_REGEX);
       assert(!match || !match.groups.color, `Should not match invalid color format: ${line}`);
     });
   });
