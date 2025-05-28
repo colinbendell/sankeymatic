@@ -449,6 +449,20 @@ Use <input name="node_theme" type="radio" id="node_theme_none" value="none" onch
 </span>
 </td>
 </tr>
+<tr>
+<td>
+<span id="theme_e" class="theme_container">
+<input name="node_theme" type="radio" id="theme_e_radio" value="e" onchange="process_sankey();" /><label id="theme_e_label" for="theme_e_radio" class="ropt"></label>
+</span>
+</td>
+<td>
+<span class="no_wrap">
+<button id="theme_e_rotate_left" type="submit" title="Rotate theme colors left" onclick="nudgeColorTheme('e',1); return false;">&lt;</button>
+<span id="theme_e_guide"></span><input type="hidden" id="themeoffset_e" value="0">
+<button id="theme_e_rotate_right" type="submit" title="Rotate theme colors right" onclick="nudgeColorTheme('e',-1); return false;">&gt;</button>
+</span>
+</td>
+</tr>
 </table>
 </div>
 

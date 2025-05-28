@@ -10,36 +10,19 @@ Requires:
     - https://github.com/canvg/canvg v3.0.9
 */
 import {
-  MAXBREAKPOINT,
   skmSettings,
   SYM_USE_REMAINDER,
   SYM_FILL_MISSING,
-  reWholeNumber,
-  reHalfNumber,
-  reInteger,
-  reDecimal,
   reCommentLine,
-  reYesNo,
-  reYes,
   reSettingsValue,
   reSettingsText,
   reMoveLine,
-  sourceHeaderPrefix,
-  sourceURLLine,
-  userDataMarker,
-  movesMarker,
-  settingsMarker,
   settingsAppliedPrefix,
-  settingsToBackfill,
   reFlowLine,
   reTSVFlowLine,
-  reCleanValue,
   reNodeLine,
-  reBareColor,
-  reRGBColor,
   colorGray60,
   userInputsField,
-  breakpointField,
   IN,
   OUT,
   BEFORE,
@@ -49,223 +32,23 @@ import {
 } from './constants.js';
 
 import { Sankey } from './sankey.js';
-import { Canvg } from 'canvg'
 import * as d3 from 'd3'
-import lzString from 'lz-string'
-
-// 'glob' points to the global object, either 'window' (browser) or 'global' (node.js)
-// This lets us contain everything in an IIFE (Immediately-Invoked Function Expression)
-
-// el: shorthand for grabbing a DOM element, often to modify it
-// elV: used if all we want is to READ the .value
-function el(domId) {
-  return document.getElementById(domId);
-}
-function elV(domId) {
-  return document.getElementById(domId).value;
-}
+import { formatHTMLAsQuotedBold, el, elV } from './ux/dom.js'
+import { togglePanel, resetMaxBreakpoint, getMaxBreakpoint, updateOutput, revealVal, fadeVal, checkRadio, getNewInputsImportedFrom, resetNewInputsImportedFrom, setValueOnPage, getHumanValueFromPage, getThemeOffsetField, updateColorThemeDisplay, nudgeColorTheme, closeDialog, openGetLinkDialog, copyGeneratedLink } from './ux/controls.js'
+import { debounce, isCalculatedAmount, parseAmountNumber, enoughPrecision as ep, formatUserData, contrastingGrayColor, escapeHTML, fileTimestamp } from './utils.js'
+import { saveDiagramAsPNG, saveDiagramAsSVG, downloadTextFile } from './services/fileService.js'
+import { logger as msg } from './ux/logger.js'
+import { LEGACY_SETTINGS_POLYFILL, approvedColorTheme, rotateColors, settingIsValid, currConfig, settingHtoC, getDiagramDefinition, extractFromUrl, removeAutoLines } from './sankeyConfig.js'
 
 // togglePanel: Called directly from the page.
-// Given a panel's name, hide or show that control panel.
-globalThis.togglePanel = panel => {
-  const panelEl = el(panel),
-    displayStyle = panelEl.tagName === 'SPAN' ? 'inline' : '',
-    // Set up the new values:
-    newVals = panelEl.style.display === 'none'
-      ? { display: displayStyle, suffix: ':', action: String.fromCharCode(8211) }
-      : { display: 'none', suffix: '...', action: '+' };
-  panelEl.style.display = newVals.display;
-  el(`${panel}_hint`).textContent = newVals.suffix;
-  el(`${panel}_indicator`).textContent = newVals.action;
-  return null;
-};
-
-/**
- * Kick off a function after a certain period has passed.
- * Used to trigger live updates when the user stops typing.
- * @param {function} callbackFn
- * @param {number} [waitMilliseconds = 500] Default is 500.
- * @returns {function}
- */
-function debounce(callbackFn, waitMilliseconds = 500) {
-  let timeoutID;
-  const delayedFn = function (...params) {
-    if (timeoutID !== undefined) {
-      clearTimeout(timeoutID);
-    }
-    timeoutID = setTimeout(() => callbackFn(...params), waitMilliseconds);
-  };
-  return delayedFn;
-}
-
-function outputFieldEl(fld) {
-  return el(`${fld}_val`);
-}
-
-// We store the breakpoint which means 'never' here for easy reference.
-// When there are valid inputs, this is set to (stages count + 1).
-globalThis.labelNeverBreakpoint = 9999;
-
-/**
- * Update the range on the label-breakpoint slider
- * @param {number} newMax
- */
-globalThis.resetMaxBreakpoint = newMax => {
-  const elBreakpointSlider = el(breakpointField);
-  elBreakpointSlider.setAttribute('max', String(newMax));
-  globalThis.labelNeverBreakpoint = newMax;
-};
+globalThis.togglePanel = togglePanel;
 
 // updateOutput: Called directly from the page.
 // Given a field's name, update the visible value shown to the user.
-globalThis.updateOutput = fld => {
-  /**
-   * Given a whole number from 50-150, add '%' and pad it if needed.
-   * @param {number} pct - number to display as a percentage
-   * @returns {string} formatted string, padded with invisible 0s if needed
-   */
-  function padPercent(pct) {
-    const pctS = String(pct);
-    if (pctS.length === 3) {
-      return `${pctS}%`;
-    }
-    return `<span class="invis">${'0'.repeat(3 - pctS.length)}</span>${pctS}%`;
-  }
-
-  const fldVal = elV(fld),
-    fldValAsNum = Number(fldVal),
-    oEl = outputFieldEl(fld);
-
-  // Special handling for relative % ranges. To keep the numbers from jumping
-  // around as you move the slider, we always show 3 digits for each value,
-  // even if one is an invisible 0.
-  if (['labels_magnify', 'labels_relativesize'].includes(fld)) {
-    if (fldValAsNum === 100) {
-      oEl.textContent = 'Same size';
-    } else {
-      oEl.innerHTML
-        = `${padPercent(200 - fldValAsNum)} — ${padPercent(fldValAsNum)}`;
-    }
-    return null;
-  }
-
-  const formats = {
-      node_h: '%',
-      node_spacing: '%',
-      node_opacity: '.2',
-      flow_curvature: '|',
-      flow_opacity: '.2',
-      labelname_weight: 'font',
-      labels_highlight: '.2',
-      labels_linespacing: '.2',
-      labelposition_autoalign: 'align',
-      labelposition_breakpoint: 'breakpoint',
-      labelvalue_weight: 'font',
-    },
-    alignLabels = new Map([[-1, 'Before'], [0, 'Centered'], [1, 'After']]),
-    fontWeights = { 100: 'Light', 400: 'Normal', 700: 'Bold' };
-  switch (formats[fld]) {
-  case '|':
-    // 0.1 is treated as 0 for curvature. Display that:
-    if (fldValAsNum <= 0.1) {
-      oEl.textContent = '0.00'; break;
-    }
-    // FALLS THROUGH to '.2' format when fldValAsNum > 0.1:
-  case '.2': oEl.textContent = d3.format('.2f')(fldValAsNum); break;
-  case '%': oEl.textContent = `${d3.format('.1f')(fldValAsNum)}%`; break;
-  case 'breakpoint':
-    oEl.textContent = fldValAsNum === globalThis.labelNeverBreakpoint
-      ? 'Never'
-      : `Stage ${fldVal}`;
-    break;
-  case 'font':
-    oEl.textContent = fontWeights[fldValAsNum] ?? fldVal; break;
-  case 'align':
-    oEl.textContent = alignLabels.get(fldValAsNum) ?? fldVal; break;
-  default: oEl.textContent = fldVal;
-  }
-  return null;
-};
-
-globalThis.revealVal = fld => {
-  // First make sure the value is up to date.
-  globalThis.updateOutput(fld);
-
-  // Swap classes to make the output appear:
-  const cl = outputFieldEl(fld).classList;
-  cl.remove('fade-init', 'fade-out');
-  cl.add('fade-in');
-  return null;
-};
-
-globalThis.fadeVal = fld => {
-  outputFieldEl(fld).classList.replace('fade-in', 'fade-out');
-  return null;
-};
-
-// isNumeric: borrowed from jQuery/Angular
-function isNumeric(n) {
-  return !Number.isNaN(n - parseFloat(n));
-}
-
-// clamp: Ensure a value n (if numeric) is between min and max.
-// Default to min if not numeric.
-function clamp(n, min, max) {
-  return isNumeric(n) ? Math.min(Math.max(Number(n), min), max) : min;
-}
-
-/**
- * @param {string} fv A flow's value.
- * @returns {boolean} True if the value is a special calculation symbol
- */
-function isCalculated(fv) {
-  return [SYM_USE_REMAINDER, SYM_FILL_MISSING].includes(fv);
-}
-
-const LOCALE_USES_COMMA_AS_DECIMAL = new Intl.NumberFormat(navigator.languages).formatToParts(1.1)[1].value === ",";
-
-/**
- * Parse a string into a number, handling locale-specific decimal separators.
- * @param {string} value
- * @returns {number | string | null}
- */
-function parseAmountNumber(value) {
-  value = value.trim();
-  if (isCalculated(value)) {
-    return value;
-  }
-
-  // disambiguate the times when the value could have a comma as a decimal separator
-  // * if it has a period, use period
-  // * if it has more than one comma, use period
-  // * if it only has one comma, check the locale for confirmation
-  if (value.indexOf('.') === -1 // no `.` in the value
-    && value.indexOf(',') === value.lastIndexOf(',') // only one `,` in the value so it's ambiguous if it is thousand or decimal
-    && LOCALE_USES_COMMA_AS_DECIMAL) { // and the locale uses `,` as decimal separator
-    value = value.replace(',', '.');
-  }
-
-  value = value.replace(reCleanValue, '');
-  if (value === '') return null;
-
-  const floatValue = Number(value);
-  if (Number.isNaN(floatValue)) return null;
-
-  return floatValue;
-}
-
-// radioRef: get the object which lets you get/set a radio input value:
-function radioRef(rId) {
-  return document.forms.skm_form.elements[rId];
-}
-
-// checkRadio: Given a radio field's id, check it.
-globalThis.checkRadio = id => {
-  el(id).checked = true;
-};
-
-// If the current inputs came from some external source, name it in this string:
-globalThis.newInputsImportedFrom = null;
+globalThis.updateOutput = updateOutput;
+globalThis.revealVal =revealVal;
+globalThis.fadeVal = fadeVal;
+globalThis.checkRadio = checkRadio;
 
 /**
  * Used when we're replacing the current diagram with something new - whether
@@ -277,93 +60,23 @@ globalThis.newInputsImportedFrom = null;
 function setUpNewInputs(newData, dataSource) {
   // Add in settings which the source might lack, to preserve the
   // original look of older diagrams:
-  el(userInputsField).value = settingsToBackfill + newData;
+  el(userInputsField).value = LEGACY_SETTINGS_POLYFILL + newData;
   // Reset breakpoint values to allow a high one in any imported diagram:
-  globalThis.resetMaxBreakpoint(MAXBREAKPOINT);
-  globalThis.newInputsImportedFrom = dataSource;
+  resetMaxBreakpoint();
+  resetNewInputsImportedFrom(dataSource);
 }
-
-// rememberedMoves: Used to track the user's repositioning of specific nodes
-// (which should be preserved across diagram renders).
-// Format is: nodeName => [moveX, moveY]
-globalThis.rememberedMoves = new Map();
 
 // resetMovesAndRender: Clear all manual moves of nodes AND re-render the
 // diagram:
 globalThis.resetMovesAndRender = () => {
-  globalThis.rememberedMoves.clear();
+  currConfig.rememberedMoves.clear();
   globalThis.process_sankey();
   return null;
 };
 
 function updateResetNodesUI() {
   // Check whether we should enable the 'reset moved nodes' button:
-  el('reset_all_moved_nodes').disabled = !globalThis.rememberedMoves.size;
-}
-
-// contrasting_gray_color:
-// Given any hex color, return a grayscale color which is lower-contrast than
-// pure black/white but still sufficient. (Used for less-important text.)
-function contrasting_gray_color(hc) {
-  const c = d3.rgb(hc),
-    yiq = (c.r * 299 + c.g * 587 + c.b * 114) / 1000,
-    // Calculate a value sufficiently far away from this color.
-    // If it's bright-ish, make a dark gray; if dark-ish, make a light gray.
-    // This algorithm is far from exact! But it seems good enough.
-    // Lowest/highest values produced are 59 and 241.
-    gray = Math.floor(yiq > 164 ? (0.75 * yiq) - 64 : (0.30 * yiq) + 192);
-  return d3.rgb(gray, gray, gray);
-}
-
-// escapeHTML: make any input string safe to display.
-// Used for displaying raw <SVG> code
-// and for reflecting the user's input back to them in messages.
-function escapeHTML(unsafeString) {
-  return unsafeString
-    .replaceAll('→', '&#8594;')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;')
-    .replaceAll('\n', '<br />');
-}
-
-// ep = "Enough Precision". Converts long decimals to have just 5 digits.
-// Why?:
-// SVG diagrams produced by SankeyMATIC don't really benefit from specifying
-// values with more than 3 decimal places, but by default the output has *13*.
-// This is frankly hard to read and actually inflates the size of the SVG
-// output by quite a bit.
-//
-// Result: values like 216.7614485930364 become 216.76145 instead.
-// The 'Number .. toString' call allows shortened output: 8 instead of 8.00000
-function ep(x) {
-  return Number(x.toFixed(5)).toString();
-}
-
-// updateMarks: given a US-formatted number string, replace with user's
-// preferred separators:
-function updateMarks(stringIn, numberMarks) {
-  // If the digit-group mark is a comma, implicitly the decimal is a dot...
-  // That's what we start with, so return with no changes:
-  if (numberMarks.group === ',') {
-    return stringIn;
-  }
-
-  // Perform hacky mark swap using ! as a placeholder:
-  return stringIn.replaceAll(',', '!')
-    .replaceAll('.', numberMarks.decimal)
-    .replaceAll('!', numberMarks.group);
-}
-
-// formatUserData: produce a value in the user's designated format:
-function formatUserData(numberIn, nStyle) {
-  const nString = updateMarks(
-    d3.format(`,.${nStyle.decimalPlaces}${nStyle.trimString}f`)(numberIn),
-    nStyle.marks
-  );
-  return `${nStyle.prefix}${nString}${nStyle.suffix}`;
+  el('reset_all_moved_nodes').disabled = !currConfig.rememberedMoves.size;
 }
 
 // initializeDiagram: Reset the SVG tag to have the chosen size &
@@ -380,104 +93,8 @@ function initializeDiagram(cfg) {
   svgEl.textContent = ''; // Someday use replaceChildren() instead
 }
 
-// fileTimestamp() => 'yyyymmdd_hhmmss' for the current locale's time.
-// Set up the formatting function once:
-const formatTimestamp = d3.timeFormat('%Y%m%d_%H%M%S');
-globalThis.fileTimestamp = () => formatTimestamp(new Date());
-
-// humanTimestamp() => readable date in the current locale,
-// e.g. "1/3/2023, 7:33:31 PM"
-globalThis.humanTimestamp = () => new Date().toLocaleString();
-
-// scaledPNG: Build a data URL for a PNG representing the current diagram:
-function scaledPNG(scale) {
-  const chartEl = el('chart'),
-    orig = { w: chartEl.clientWidth, h: chartEl.clientHeight },
-    scaleFactor = clamp(scale, 1, 6),
-    scaled = { w: orig.w * scaleFactor, h: orig.h * scaleFactor },
-    // Canvg 3 needs interesting offsets added when scaling up:
-    offset = {
-      x: (scaled.w - orig.w) / (2 * scaleFactor),
-      y: (scaled.h - orig.h) / (2 * scaleFactor),
-    },
-    // Find the (hidden) canvas element in our page:
-    canvasEl = el('png_preview'),
-    canvasContext = canvasEl.getContext('2d'),
-    svgContent = (new XMLSerializer()).serializeToString(el('sankey_svg'));
-
-  // Set the canvas element to the final height/width the user wants.
-  // NOTE: THIS CAN FAIL. Canvases have maximum dimensions and a max area.
-  // TODO: Disable any export buttons which will fail silently.
-  canvasEl.width = scaled.w;
-  canvasEl.height = scaled.h;
-
-  // Give Canvg what it needs to produce a rendered image:
-  const canvgObj = Canvg.fromString(
-    canvasContext,
-    svgContent,
-    {
-      ignoreMouse: true,
-      ignoreAnimation: true,
-      ignoreDimensions: true, // DON'T make the canvas size match the svg
-      scaleWidth: scaled.w,
-      scaleHeight: scaled.h,
-      offsetX: offset.x,
-      offsetY: offset.y,
-    }
-  );
-  canvgObj.render();
-
-  // Turn canvg's output into a data URL and return it with size info:
-  return [scaled, canvasEl.toDataURL('image/png')];
-}
-
-// downloadABlob: given an object & a filename, send it to the user:
-function downloadADataURL(dataURL, name) {
-  const newA = document.createElement('a');
-  newA.style.display = 'none';
-  newA.href = dataURL;
-  newA.download = name;
-  document.body.append(newA);
-  newA.click(); // This kicks off the download
-  newA.remove(); // Discard the Anchor we just clicked; it's no longer needed
-}
-
-globalThis.saveDiagramAsPNG = scale => {
-  const [size, pngURL] = scaledPNG(scale);
-  downloadADataURL(
-    pngURL,
-    `sankeymatic_${globalThis.fileTimestamp()}_${size.w}x${size.h}.png`
-  );
-};
-
-// downloadATextFile: given a string & a filename, send it to the user:
-function downloadATextFile(txt, name) {
-  const textBlob = new Blob([txt], { type: 'text/plain' }),
-    tempURL = URL.createObjectURL(textBlob);
-  downloadADataURL(tempURL, name);
-  URL.revokeObjectURL(tempURL);
-}
-
-// saveDiagramAsSVG: take the current state of 'sankey_svg' and relay
-// it nicely to the user
-globalThis.saveDiagramAsSVG = () => {
-  // Make a copy of the true SVG & make a few cosmetic changes:
-  const svgForExport
-  = el('sankey_svg').outerHTML
-  // Take out the id and the class declaration for the background:
-    .replace(' id="sankey_svg"', '')
-    .replace(/ class="svg_background_[a-z]+"/, '')
-  // Add a title placeholder & credit comment after the FIRST tag:
-    .replace(
-      />/,
-      '>\r\n<title>Your Diagram Title</title>\r\n'
-          + `<!-- Generated with SankeyMATIC: ${globalThis.humanTimestamp()} -->\r\n`
-    )
-  // Add some line breaks to highlight where [g]roups start/end
-  // and where each path/text/rect begins:
-    .replace(/><(g|\/g|path|text|rect)/g, '>\r\n<$1');
-  downloadATextFile(svgForExport, `sankeymatic_${globalThis.fileTimestamp()}.svg`);
-};
+globalThis.saveDiagramAsPNG = saveDiagramAsPNG;
+globalThis.saveDiagramAsSVG = saveDiagramAsSVG;
 
 // MARK SVG path specification functions
 
@@ -539,206 +156,6 @@ function curvedFlowPathFunction(curvature) {
   };
 }
 
-// MARK Validation of Settings
-
-// settingIsValid(metadata, human value, size object {w: _, h: _}):
-// return [true, computer value] IF the given value meets the criteria.
-// Note: The 'size' object is only used when validating 'contained' settings.
-function settingIsValid(sData, hVal, cfg) {
-  const [dataType, defaultVal, allowList] = sData;
-
-  // Checkboxes: Translate y/n/Y/N/Yes/No to true/false.
-  if (dataType === 'yn' && reYesNo.test(hVal)) {
-    return [true, reYes.test(hVal)];
-  }
-
-  if (['radio', 'list'].includes(dataType)
-      && allowList.includes(hVal)) {
-    return [true, hVal];
-  }
-
-  if (dataType === 'color') {
-    let rgb;
-    if (reRGBColor.test(hVal)) {
-      rgb = d3.rgb(hVal);
-    } else if (reBareColor.test(hVal)) {
-      rgb = d3.rgb(`#${hVal}`);
-    } else { // maybe it's a CSS name like blue/green/lime/maroon/etc.?
-      const namedRGB = d3.color(hVal);
-      if (namedRGB) {
-        rgb = namedRGB;
-      }
-    }
-    // If we found a real color spec, return the full 6-char html value.
-    // (This fixes the problem of a 3-character color like #789.)
-    if (rgb) {
-      return [true, rgb.formatHex()];
-    }
-  }
-
-  // valueInBounds: Verify a numeric value is in a range.
-  // 'max' can be undefined, which is treated as 'no maximum'
-  function valueInBounds(v, [min, max]) {
-    return v >= min && (max === undefined || v <= max);
-  }
-
-  if (dataType === 'text') {
-    // UN-double any single quotes:
-    const unescapedVal = hVal.replaceAll("''", "'");
-    // Make sure the string's length is in the right range:
-    if (valueInBounds(unescapedVal.length, allowList)) {
-      return [true, unescapedVal];
-    }
-  }
-
-  // The only types remaining are numbers:
-  const valAsNum = Number(hVal);
-  if (dataType === 'decimal'
-      && reDecimal.test(hVal)
-      && valueInBounds(valAsNum, [0, 1.0])) {
-    return [true, valAsNum];
-  }
-  if (dataType === 'integer'
-      && reInteger.test(hVal)
-      && valueInBounds(valAsNum, allowList)) {
-    return [true, valAsNum];
-  }
-  if (dataType === 'half'
-      && reHalfNumber.test(hVal)
-      && valueInBounds(valAsNum, allowList)) {
-    return [true, valAsNum];
-  }
-  if (['whole', 'contained', 'breakpoint'].includes(dataType)
-      && reWholeNumber.test(hVal)) {
-    let [minV, maxV] = [0, 0];
-    switch (dataType) {
-    case 'whole': [minV, maxV] = allowList; break;
-      // Dynamic values (like margins) should be processed after the
-      // diagram's size is set so that we can compare them to their
-      // specific containing dimension (that's why they appear later
-      // in the settings list):
-    case 'contained': maxV = cfg[allowList[1]]; break;
-      // breakpoints: We can't just use the current 'never' value
-      // for comparison, since we may be importing a new diagram with
-      // a different number of stages:
-    case 'breakpoint': maxV = defaultVal; break;
-      // no default
-    }
-    if (valueInBounds(valAsNum, [minV, maxV])) {
-      return [true, valAsNum];
-    }
-  }
-  // If we could not affirmatively say this value is good:
-  return [false];
-}
-
-// setValueOnPage(name, type, computer-friendly value):
-// Given a valid value, update the field on the page to adopt it:
-function setValueOnPage(sName, dataType, cVal) {
-  // console.log(sName, dataType, cVal);
-  switch (dataType) {
-  case 'radio': radioRef(sName).value = cVal; break;
-    // cVal is expected to be boolean at this point for checkboxes:
-  case 'yn': el(sName).checked = cVal; break;
-    // All remaining types (color, list, text, whole/decimal/etc.):
-  default: el(sName).value = cVal;
-  }
-}
-
-// getHumanValueFromPage(name, type):
-// Look up a particular setting and return the appropriate human-friendly value
-function getHumanValueFromPage(fName, dataType) {
-  switch (dataType) {
-  case 'radio': return radioRef(fName).value;
-  case 'color': return el(fName).value.toLowerCase();
-    // translate true/false BACK to Y/N in this case:
-  case 'yn': return el(fName)?.checked ? 'Y' : 'N';
-  case 'list':
-  case 'text':
-    return el(fName).value;
-    // All remaining types are numeric:
-  default: return Number(el(fName).value);
-  }
-}
-
-// Take a human-friendly setting and make it JS-friendly:
-function settingHtoC(hVal, dataType) {
-  switch (dataType) {
-  case 'whole':
-  case 'half':
-  case 'decimal':
-  case 'integer':
-  case 'contained':
-  case 'breakpoint':
-    return Number(hVal);
-  case 'yn': return reYes.test(hVal);
-  default: return hVal;
-  }
-}
-
-// MARK Message Display
-
-// Show a value quoted & bolded & HTML-escaped:
-function highlightSafeValue(userV) {
-  return `&quot;<strong>${escapeHTML(userV)}</strong>&quot;`;
-}
-
-// Isolated logic for managing messages to the user:
-const msg = {
-  areas: new Map([
-    ['issue', { id: 'issue_messages', class: 'errormessage' }],
-    ['difference', { id: 'imbalance_messages', class: 'differencemessage' }],
-    ['total', { id: 'totals_area', class: '' }],
-    ['info', { id: 'info_messages', class: 'okmessage' }],
-    ['console', { id: 'console_lines', class: '' }],
-  ]),
-  add: (msgHTML, msgArea = 'info') => {
-    const msgData = msg.areas.get(msgArea) || msg.areas.get('info'),
-      msgDiv = document.createElement('div');
-
-    msgDiv.innerHTML = msgHTML;
-    if (msgData.class.length) {
-      msgDiv.classList.add(msgData.class);
-    }
-
-    el(msgData.id).append(msgDiv);
-  },
-  consoleContainer: el('console_area'),
-  log: msgHTML => {
-    // Reveal the console if it's hidden:
-    msg.consoleContainer.style.display = '';
-    msg.add(msgHTML, 'console');
-  },
-  flagsSeen: new Set(),
-  logOnce: (flag, msgHTML) => {
-    if (msg.flagsSeen.has(flag)) {
-      return;
-    }
-    msg.log(`<span class="info_text">${msgHTML}</span>`);
-    msg.flagsSeen.add(flag);
-  },
-  queue: [],
-  addToQueue: (msgHTML, msgArea) => {
-    msg.queue.push([msgHTML, msgArea]);
-  },
-  // Clear out any old messages:
-  resetAll: () => {
-    Array.from(msg.areas.values())
-      .map(a => a.id)
-      .forEach(id => {
-        el(id).replaceChildren();
-      });
-    msg.consoleContainer.style.display = 'none';
-    msg.flagsSeen.clear();
-  },
-  // If any pending messages have been queued, show them:
-  showQueued: () => {
-    while (msg.queue.length) {
-      msg.add(...msg.queue.shift());
-    }
-  },
-};
-
 // MARK Loading Sample Graphs
 
 // replaceGraph: Called directly from the page.
@@ -746,17 +163,17 @@ const msg = {
 // Run some checks before we commit...
 globalThis.replaceGraph = async graphName => {
   // Is there a recipe with the given key? If not, exit early:
-  const savedRecipe = await fetch(`samples/${graphName}.txt`).then((r) => r.text());
+  const savedRecipe = await fetch(`samples/${graphName}.txt`).then(r => r.text());
   if (!savedRecipe) {
     // (This shouldn't happen unless the user is messing around in the DOM)
     msg.add(
-      `Requested sample diagram ${highlightSafeValue(graphName)} not found.`,
+      `Requested sample diagram ${formatHTMLAsQuotedBold(graphName)} not found.`,
       'issue'
     );
     return null;
   }
 
-  setUpNewInputs(savedRecipe, highlightSafeValue(graphName));
+  setUpNewInputs(savedRecipe, formatHTMLAsQuotedBold(graphName));
   globalThis.process_sankey();
 
   return null;
@@ -764,65 +181,10 @@ globalThis.replaceGraph = async graphName => {
 
 // MARK Color Theme handling
 
-// colorThemes: The available color arrays to assign to Nodes.
-const colorThemes = new Map([
-  ['a', {
-    colorset: d3.schemeCategory10,
-    nickname: 'Categories',
-    d3Name: 'Category10',
-  }],
-  ['b', {
-    colorset: d3.schemeTableau10,
-    nickname: 'Tableau10',
-    d3Name: 'Tableau10',
-  }],
-  ['c', {
-    colorset: d3.schemeDark2,
-    nickname: 'Dark',
-    d3Name: 'Dark2',
-  }],
-  ['d', {
-    colorset: d3.schemeSet3,
-    nickname: 'Varied',
-    d3Name: 'Set3',
-  }],
-]);
-
-function approvedColorTheme(themeKey) {
-  // Give back an empty theme if the key isn't valid:
-  return colorThemes.get(themeKey.toLowerCase())
-    || { colorset: [], nickname: 'Invalid Theme', d3Name: '?' };
-}
-
-// rotateColors: Return a copy of a color array, rotated by the offset:
-function rotateColors(colors, offset) {
-  const goodOffset = clamp(offset, 0, colors.length);
-  return colors.slice(goodOffset).concat(colors.slice(0, goodOffset));
-}
-
-// We have to construct this fieldname in a few places:
-function offsetField(key) {
-  return `themeoffset_${key}`;
-}
-
 // nudgeColorTheme: Called directly from the page.
 // User just clicked an arrow on a color theme.
 // Rotate the theme colors & re-display the diagram with the new set.
-globalThis.nudgeColorTheme = (themeKey, move) => {
-  const themeOffsetEl = el(offsetField(themeKey)),
-    currentOffset = (themeOffsetEl === null) ? 0 : themeOffsetEl.value,
-    colorsInTheme = approvedColorTheme(themeKey).colorset.length,
-    newOffset = (colorsInTheme + +currentOffset + +move) % colorsInTheme;
-
-  // Update the stored offset with the new value (0 .. last color):
-  themeOffsetEl.value = newOffset;
-
-  // If the theme the user is updating is not the active one, switch to it:
-  el(`theme_${themeKey}_radio`).checked = true;
-
-  globalThis.process_sankey();
-  return null;
-};
+globalThis.nudgeColorTheme = nudgeColorTheme;
 
 // render_sankey: given nodes, flows, and other config, MAKE THE SVG DIAGRAM:
 function render_sankey(allNodes, allFlows, cfg, numberStyle) {
@@ -1026,19 +388,22 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Update the label breakpoint controls based on the # of stages.
   // We need a value meaning 'never'; that's 1 past the (1-based) end of the
   // array, so: length + 1
-  const newMax = stagesArr.length + 1,
-    oldMax = globalThis.labelNeverBreakpoint;
-    // Has the 'never' value changed?
+  const newMax = stagesArr.length + 1;
+  const oldMax = getMaxBreakpoint();
+  // Has the 'never' value changed?
   if (newMax !== oldMax) {
-    // Update the slider's range with the new maximum:
-    globalThis.resetMaxBreakpoint(newMax);
     // If the stage count has become lower than the breakpoint value, OR
     // if the stage count has increased but the old 'never' value was chosen,
     // we also need to adjust the slider's value to be the new 'never' value:
     if (cfg.labelposition_breakpoint > newMax
       || cfg.labelposition_breakpoint === oldMax) {
-      el(breakpointField).value = newMax;
+      // Update the slider's range with the new maximum and move slider
+      resetMaxBreakpoint(newMax, true);
       cfg.labelposition_breakpoint = newMax;
+    }
+    else {
+      // Update the slider's range with the new maximum:
+      resetMaxBreakpoint(newMax);
     }
   }
 
@@ -1274,7 +639,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       ? [cfg.node_color] // (User wants just one color)
       : rotateColors(
         approvedColorTheme(cfg.node_theme).colorset,
-        cfg[offsetField(cfg.node_theme)]
+        cfg[getThemeOffsetField(cfg.node_theme)]
       ),
     colorScaleFn = d3.scaleOrdinal(userColorArray),
     // Drawing curves with curvature of <= 0.1 looks bad and produces visual
@@ -1544,7 +909,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     updateLastNodePosition(n);
     if (isAZeroMove(n.move)) {
       // There's no actual move now. If one was stored, forget it:
-      globalThis.rememberedMoves.delete(n.name);
+      currConfig.rememberedMoves.delete(n.name);
     } else {
       // We save moves keyed to their NAME (not their index), so they
       // can be remembered even when the inputs change their order.
@@ -1552,7 +917,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       // In the case of a move already remembered, this will replace the
       // original moves with an identical copy...seems less trouble than
       // checking first.
-      globalThis.rememberedMoves.set(n.name, n.move);
+      currConfig.rememberedMoves.set(n.name, n.move);
     }
     // The count of rememberedMoves may have changed, so also update the UI:
     updateResetNodesUI();
@@ -1575,7 +940,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Show helpful guides/content for the current drag. We put it all in a
   // distinct 'g'roup for helper content so we can remove it easily later:
   function dragNodeStarted(event, n) {
-    const grayColor = contrasting_gray_color(cfg.bg_color);
+    const grayColor = contrastingGrayColor(cfg.bg_color);
     let diagHelperLayer = diagMain.select('#helper_layer');
     // Create the helper layer if it doesn't exist:
     if (!diagHelperLayer.nodes.length) {
@@ -1772,7 +1137,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       mMargin = Math.round(mSize / 2) - 1,
       mColor
        = cfg.bg_color === '#ffffff' ? '#336781'
-         : contrasting_gray_color(cfg.bg_color);
+         : contrastingGrayColor(cfg.bg_color);
     diagLabels.append('text')
     // Anchor the text to the midpoint of the canvas (not the graph):
       .attr('text-anchor', 'middle')
@@ -1839,15 +1204,15 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
 
   // Now that all of the SVG nodes and labels exist, it's time to re-apply
   // any remembered moves:
-  if (globalThis.rememberedMoves.size) {
+  if (currConfig.rememberedMoves.size) {
     // Make a copy of the list of moved-Node names (so we can destroy it):
-    const movedNodes = new Set(globalThis.rememberedMoves.keys());
+    const movedNodes = new Set(currConfig.rememberedMoves.keys());
 
     // Look for all node objects matching a name in the list:
     allNodes.filter(shadowFilter)
       .filter(n => movedNodes.has(n.name))
       .forEach(n => {
-        n.move = globalThis.rememberedMoves.get(n.name);
+        n.move = currConfig.rememberedMoves.get(n.name);
         // Make this move visible in the diagram:
         applyNodeMove(n.index);
         updateLastNodePosition(n);
@@ -1861,7 +1226,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     // Any remaining items in movedNodes must refer to Nodes which are no
     // longer with us. Delete those from the global memory:
     movedNodes.forEach(nodeName => {
-      globalThis.rememberedMoves.delete(nodeName);
+      currConfig.rememberedMoves.delete(nodeName);
     });
 
     // Re-layout the diagram once, after all of the above moves:
@@ -1869,118 +1234,12 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   }
 } // end of render_sankey
 
-// MARK Serializing the diagram
-
-// Run through the current input lines & drop any old headers &
-// successfully applied settings. Returns a trimmed string.
-function removeAutoLines(lines) {
-  return lines
-    .filter(l => !(
-      l.startsWith(sourceHeaderPrefix)
-      || l.startsWith(settingsAppliedPrefix)
-      || [settingsMarker, userDataMarker, sourceURLLine, movesMarker]
-        .includes(l)
-    ))
-    .join('\n')
-    .replace(/^\n+/, '') // trim blank lines at the start & end
-    .replace(/\n+$/, '');
-}
-
-/**
- * Produce a text representation of the current diagram, including settings
- * @param {boolean} verbose - If true, include extra content for humans
- * @returns {string}
- */
-function getDiagramDefinition(verbose) {
-  const outputLines = [],
-    customOutputFns = new Map([
-      ['list', v => `'${v}'`], // Always quote 'list' values
-      // In a text field we may encounter single-quotes, so double those:
-      ['text', v => `'${v.replaceAll("'", "''")}'`],
-    ]);
-  let currentSettingGroup = '';
-
-  // outputFldName: produce the full field name or an indented short version:
-  function outputFldName(fld) {
-    const prefixLen = currentSettingGroup.length,
-      shortFldName = prefixLen && fld.startsWith(`${currentSettingGroup}_`)
-        ? `  ${fld.substring(prefixLen + 1)}`
-        : fld;
-    return shortFldName.replaceAll('_', ' ');
-  }
-
-  function add(...lines) {
-    outputLines.push(...lines);
-  }
-  function addIfV(...lines) {
-    if (verbose) {
-      add(...lines);
-    }
-  }
-
-  addIfV(
-    `${sourceHeaderPrefix} Saved: ${globalThis.humanTimestamp()}`,
-    sourceURLLine,
-    '',
-    userDataMarker,
-    ''
-  );
-  add(removeAutoLines(elV(userInputsField).split('\n')));
-  addIfV('', settingsMarker, '');
-
-  // Add all of the settings:
-  skmSettings.forEach((fldData, fldName) => {
-    if (fldName.startsWith('internal_')) {
-      return;
-    } // Ignore internals
-
-    const dataType = fldData[0],
-      activeHVal = getHumanValueFromPage(fldName, dataType),
-      outVal = customOutputFns.has(dataType)
-        ? customOutputFns.get(dataType)(activeHVal)
-        : activeHVal;
-    add(`${outputFldName(fldName)} ${outVal}`);
-    currentSettingGroup = fldName.split('_')[0];
-  });
-
-  // If there are any manually-moved nodes, add them to the output:
-  if (globalThis.rememberedMoves.size) {
-    addIfV('', movesMarker, '');
-    globalThis.rememberedMoves.forEach((move, nodeName) => {
-      add(`move ${nodeName} ${ep(move[0])}, ${ep(move[1])}`);
-    });
-  }
-
-  return outputLines.join('\n');
-}
-
-const urlInputsParam = 'i',
-  linkTargetDiv = 'generatedLink',
-  copiedMsgId = 'copiedMsg';
-
-/**
- * @returns {URL}
- */
-function generateLink() {
-  const minDiagramDef = getDiagramDefinition(false),
-    compressed = lzString.compressToEncodedURIComponent(minDiagramDef),
-    currentUrl = new URL(globalThis.location.href);
-    // Set the new parameter, encoded to keep it from wrapping strangely:
-  currentUrl.search
-    = `${urlInputsParam}=${
-      encodeURIComponent(compressed).replaceAll('-', '%2D')
-    }`;
-  return currentUrl;
-}
-
 // MARK Save/Load diagram definitions in text files
 
 globalThis.saveDiagramToFile = () => {
-  const verboseDiagramDef = getDiagramDefinition(true);
-  downloadATextFile(
-    verboseDiagramDef,
-    `sankeymatic_${globalThis.fileTimestamp()}_source.txt`
-  );
+  const text = getDiagramDefinition(true);
+  const name = `sankeymatic_${fileTimestamp()}_source.txt`;
+  downloadTextFile(text, name);
 };
 
 globalThis.loadDiagramFile = async () => {
@@ -1992,70 +1251,34 @@ globalThis.loadDiagramFile = async () => {
   }
 
   // Read the file's text contents:
-  const uploadedText = await fileList[0].text(),
-    userFileName = fileList[0].name;
-  setUpNewInputs(uploadedText, highlightSafeValue(userFileName));
+  const uploadedText = await fileList[0].text();
+  const userFileName = fileList[0].name;
+  setUpNewInputs(uploadedText, formatHTMLAsQuotedBold(userFileName));
   globalThis.process_sankey();
 };
 
 // MARK dialog functions
 
-/**
- * @param {string} dId - the ID of the dialog element to close (minus 'Dialog')
- */
-globalThis.closeDialog = dId => {
-  const dEl = el(`${dId}Dialog`);
-  if (dEl) {
-    dEl.close();
-  }
-};
-
-globalThis.openGetLinkDialog = () => {
-  const dEl = el('getLinkDialog');
-  if (dEl) {
-    dEl.showModal();
-    // Make the link for the current diagram's state & fill it in:
-    const diagramUrl = generateLink(),
-      tEl = el(linkTargetDiv);
-    tEl.innerText = diagramUrl.toString();
-    tEl.focus();
-  }
-};
-
-globalThis.copyGeneratedLink = () => {
-  if (globalThis.navigator?.clipboard) {
-    globalThis.navigator.clipboard.writeText(el(linkTargetDiv).innerText);
-    el(copiedMsgId).innerText = 'Copied!';
-    setTimeout(() => {
-      el(copiedMsgId).innerText = '';
-    }, 2000);
-  }
-};
+globalThis.closeDialog = closeDialog;
+globalThis.openGetLinkDialog = openGetLinkDialog;
+globalThis.copyGeneratedLink = copyGeneratedLink;
 
 /**
  * If we are running in the browser context, check for a serialized diagram
  * in the URL parameters. If found, load it.
  */
 export function loadFromQueryString() {
-  const searchString = globalThis.location?.search;
-  if (searchString) {
-    const compressedInputs = new URLSearchParams(searchString)?.get(urlInputsParam);
-    if (compressedInputs) {
-      const expandedInputs = lzString.decompressFromEncodedURIComponent(compressedInputs);
-      // Make sure the input was successfully read.
-      // (LZstring gives back a blank string or a null when it fails):
-      if (expandedInputs) {
-        setUpNewInputs(expandedInputs, 'URL');
-      } else {
-        // Tell the user something went wrong:
-        msg.addToQueue(
-          `The input string provided in the URL (${highlightSafeValue(
-            `${compressedInputs.substring(0, 8)}...`
-          )}) was not decodable.`,
-          'issue'
-        );
-      }
+  try {
+    const expandedInputs = extractFromUrl()
+
+    // Make sure the input was successfully read.
+    // (LZstring gives back a blank string or a null when it fails):
+    if (expandedInputs) {
+      setUpNewInputs(expandedInputs, 'URL');
     }
+  } catch {
+    // Tell the user something went wrong:
+    msg.addToQueue(`The input string provided in the URL was not decodable.`, 'issue');
   }
 }
 
@@ -2065,30 +1288,6 @@ export function loadFromQueryString() {
 globalThis.process_sankey = () => {
   let [maxDecimalPlaces, maxNodeIndex, maxNodeVal] = [0, 0, 0];
   const uniqueNodes = new Map();
-
-  // Update the display of all known themes given their offsets:
-  function updateColorThemeDisplay() {
-    // template string for the color swatches:
-    const makeSpanTag = (color, count, themeName) => (
-      `<span style="background-color: ${color};" `
-      + `class="color_sample_${count}" `
-      + `title="${color} from d3 color scheme ${themeName}">`
-      + '&nbsp;</span>'
-    );
-    for (const t of colorThemes.keys()) {
-      const theme = approvedColorTheme(t),
-        themeOffset = elV(offsetField(t)),
-        colorset = rotateColors(theme.colorset, themeOffset),
-        // Show the array rotated properly given the offset:
-        renderedGuide = colorset
-          .map(c => makeSpanTag(c, colorset.length, theme.d3Name))
-          .join('');
-      // SOMEDAY: Add an indicator for which colors are/are not
-      // in use?
-      el(`theme_${t}_guide`).innerHTML = renderedGuide;
-      el(`theme_${t}_label`).textContent = theme.nickname;
-    }
-  }
 
   // NODE-handling functions:
 
@@ -2101,9 +1300,9 @@ globalThis.process_sankey = () => {
    * @returns {boolean} nameInfo.hideLabel True if the name was struck through
    */
   function parseNodeName(rawName) {
-    const hiddenNameMatches = rawName.match(/^-(.*)-$/),
-      hideThisLabel = hiddenNameMatches !== null,
-      trueName = hideThisLabel ? hiddenNameMatches[1] : rawName;
+    const hiddenNameMatches = rawName.match(/^-(.*)-$/);
+    const hideThisLabel = hiddenNameMatches !== null;
+    const trueName = hideThisLabel ? hiddenNameMatches[1] : rawName;
     return { trueName: trueName, hideLabel: hideThisLabel };
   }
 
@@ -2117,8 +1316,8 @@ globalThis.process_sankey = () => {
    * @returns {object} The node's object (from uniqueNodes)
    */
   function setUpNode(nodeName, row) {
-    const { trueName, hideLabel } = parseNodeName(nodeName),
-      thisNode = uniqueNodes.get(trueName); // Does this node exist?
+    const { trueName, hideLabel } = parseNodeName(nodeName);
+    let thisNode = uniqueNodes.get(trueName); // Does this node exist?
     if (thisNode) {
       // If so, should the new row # replace the stored row #?:
       if (thisNode.sourceRow > row) {
@@ -2156,9 +1355,7 @@ globalThis.process_sankey = () => {
 
     // If there's a color and it's a color CODE, put back the #:
     // TODO: honor or translate color names?
-    if (reBareColor.test(nodeParams.color)) {
-      nodeParams.color = `#${nodeParams.color}`;
-    }
+    if (nodeParams.color && nodeParams.color[0] !== '#') nodeParams.color = `#${nodeParams.color}`;
 
     // Don't overwrite the 'name' value here, it can mess up tooltips:
     delete nodeParams.name;
@@ -2215,7 +1412,7 @@ globalThis.process_sankey = () => {
       // We don't verify the name because we don't yet know the list to
       // match against. Assume the node names are provided in good faith.
       const [nodeName, moveX, moveY] = moveParts.slice(-3);
-      globalThis.rememberedMoves.set(nodeName, [Number(moveX), Number(moveY)]);
+      currConfig.rememberedMoves.set(nodeName, [Number(moveX), Number(moveY)]);
       linesWithValidSettings.add(row);
       return;
     }
@@ -2355,7 +1552,7 @@ globalThis.process_sankey = () => {
           amount,
           sourceRow: row,
           // Remember any special symbol even after the amount will be known:
-          operation: isCalculated(amount) ? amount : null,
+          operation: isCalculatedAmount(amount) ? amount : null,
           color,
           opacity,
         });
@@ -2383,7 +1580,7 @@ globalThis.process_sankey = () => {
   // Mention any un-parseable lines:
   invalidLines.forEach(parsingError => {
     msg.add(
-      `${parsingError.message}: ${highlightSafeValue(parsingError.value)}`,
+      `${parsingError.message}: ${formatHTMLAsQuotedBold(parsingError.value)}`,
       'issue'
     );
   });
@@ -2487,11 +1684,11 @@ globalThis.process_sankey = () => {
     // We check af.value here, *not* .operation. If a calculation has been
     //   completed, we want to know that resulting amount.
     // (Note: We won't re-process flow 'ef' in this inner loop --
-    //   the 'isCalculated' filter excludes its unresolved .value)
+    //   the 'isCalculatedAmount' filter excludes its unresolved .value)
     let [parentTotal, siblingTotal] = [0, 0];
     approvedFlows
       .filter(
-        af => !isCalculated(af.value)
+        af => !isCalculatedAmount(af.value)
           && [af[k.arriving.node].name, af[k.leaving.node].name]
             .includes(parentN.name)
       )
@@ -2646,12 +1843,12 @@ globalThis.process_sankey = () => {
   // Having processed all the lines now -- if the current inputs came from a
   // file or from a URL, we can clean out all the auto-generated stuff,
   // leaving just the user's inputs:
-  if (globalThis.newInputsImportedFrom) {
+  if (getNewInputsImportedFrom()) {
     // Drop all the auto-generated content and all successful settings:
     el(userInputsField).value = removeAutoLines(updatedSourceLines);
     // Also, leave them a note confirming where the inputs came from.
-    msg.add(`Imported diagram from ${globalThis.newInputsImportedFrom}`);
-    globalThis.newInputsImportedFrom = null;
+    msg.add(`Imported diagram from ${getNewInputsImportedFrom()}`);
+    resetNewInputsImportedFrom();
   } else {
     el(userInputsField).value = updatedSourceLines.join('\n');
   }
@@ -2826,18 +2023,15 @@ globalThis.process_sankey = () => {
   // Now that the SVG code has been generated, figure out this diagram's
   // Scale & make that available to the user:
   const tallestNodeHeight
-    = parseFloat(el(`r${maxNodeIndex}`).getAttributeNS(null, 'height')),
+    = parseFloat(el(`r${maxNodeIndex}`).getAttributeNS(null, 'height'));
     // Use 1 decimal place to describe the tallest node's height:
-    formattedPixelCount = updateMarks(
-      d3.format(',.1f')(tallestNodeHeight),
-      numberStyle.marks
-    ),
-    // Show this value using the user's units, but override the number of
-    // decimal places to show 4 digits of precision:
-    unitsPerPixel = formatUserData(
-      maxNodeVal / (tallestNodeHeight || Number.MIN_VALUE),
-      { ...numberStyle, decimalPlaces: 4 }
-    );
+  const formattedPixelCount = Number(tallestNodeHeight.toFixed(1)).toLocaleString();
+  // Show this value using the user's units, but override the number of
+  // decimal places to show 4 digits of precision:
+  const unitsPerPixel = formatUserData(
+    maxNodeVal / (tallestNodeHeight || Number.MIN_VALUE),
+    { ...numberStyle, decimalPlaces: 4 }
+  );
   el('scale_figures').innerHTML
     = `<strong>${unitsPerPixel}</strong> per pixel `
     + `(${withUnits(maxNodeVal)}/${formattedPixelCount}px)`;

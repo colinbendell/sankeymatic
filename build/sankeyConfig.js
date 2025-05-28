@@ -1,0 +1,292 @@
+import * as d3 from 'd3'
+import { clamp, humanTimestamp } from './utils.js';
+import { getHumanValueFromPage, USER_INPUTS_FIELD } from './ux/controls.js';
+import { skmSettings } from './constants.js';
+import { elV } from './ux/dom.js';
+import lzString from 'lz-string'
+
+// If someone is importing/linking a diagram which was made *BEFORE*
+// the newest settings existed, prefix the incoming source with these
+// lines so that their diagram will still look like it did when they
+// made it.
+// (The trick here is that if their diagram was made AFTER the new
+// settings appeared, then values for these settings will be present
+// later in the incoming source data and will override these lines.)
+export const LEGACY_SETTINGS_POLYFILL = `labelvalue position after
+labelposition scheme per_stage
+labels relativesize 100
+magnify 100
+ `;
+
+// colorThemes: The available color arrays to assign to Nodes.
+export const COLOR_THEMES = new Map([
+  ['a', {
+    colorset: d3.schemeCategory10,
+    nickname: 'Categories',
+    d3Name: 'Category10',
+  }],
+  ['b', {
+    colorset: d3.schemeTableau10,
+    nickname: 'Tableau10',
+    d3Name: 'Tableau10',
+  }],
+  ['c', {
+    colorset: d3.schemeDark2,
+    nickname: 'Dark',
+    d3Name: 'Dark2',
+  }],
+  ['d', {
+    colorset: d3.schemeSet3,
+    nickname: 'Varied',
+    d3Name: 'Set3',
+  }],
+  ['e', {
+    colorset: d3.schemeObservable10,
+    nickname: 'Observable10',
+    d3Name: 'Observable10',
+  }],
+]);
+
+export const approvedColorTheme = themeKey => {
+  // Give back an empty theme if the key isn't valid:
+  return COLOR_THEMES.get(themeKey.toLowerCase())
+      || { colorset: [], nickname: 'Invalid Theme', d3Name: '?' };
+}
+
+// rotateColors: Return a copy of a color array, rotated by the offset:
+export const rotateColors = (colors, offset) => {
+  const goodOffset = clamp(offset, 0, colors.length);
+  return colors.slice(goodOffset).concat(colors.slice(0, goodOffset));
+}
+
+const REGEX_HEX_COLOR = /^#?([a-f0-9]{3}|[a-f0-9]{6})$/i;
+const REGEX_WHOLE_NUMBER = /^\d+$/;
+const REGEX_HALF_NUMBER = /^\d+(?:\.5)?$/;
+const REGEX_INTEGER = /^-?\d+$/;
+const REGEX_DECIMAL = /^\d(?:\.\d+)?$/;
+const REGEX_COMMENT_LINE = /^(?:'|\/\/)/; // Line starts with // or '
+const REGEX_YES_NO = /^(?:y|yes|n|no)/i; // = Y/y/Yes/YES/etc. or N/n/No/NO/etc.
+const REGEX_YES = /^(?:y|yes)/i;        // = Y/y/Yes/YES/etc.
+
+// settingIsValid(metadata, human value, size object {w: _, h: _}):
+// return [true, computer value] IF the given value meets the criteria.
+// Note: The 'size' object is only used when validating 'contained' settings.
+export const settingIsValid = (sData, hVal, cfg) => {
+  // valueInBounds: Verify a numeric value is in a range.
+  // 'max' can be undefined, which is treated as 'no maximum'
+  function valueInBounds(v, [min, max]) {
+    return v >= min && (max === undefined || v <= max);
+  }
+
+  const [dataType, defaultVal, allowList] = sData;
+  switch (dataType) {
+  case 'yn':
+    // Checkboxes: Translate y/n/Y/N/Yes/No to true/false.
+    if (REGEX_YES_NO.test(hVal)) return [true, REGEX_YES.test(hVal)];
+    break;
+  case 'radio':
+  case 'list':
+    if (allowList.includes(hVal)) return [true, hVal];
+    break;
+  case 'color':
+    let rgb = hVal;
+    if (REGEX_HEX_COLOR.test(hVal)) {
+      if (rgb[0] !== '#') rgb = `#${rgb}`;
+      if (rgb.length === 4) rgb = rgb.replace(/#(.)(.)(.)/, '$1$1$2$2$3$3');
+    } else {
+      rgb = d3.color(hVal)?.formatHex();
+    }
+    if (rgb) {
+      return [true, rgb];
+    }
+    break;
+  case 'text':
+    // UN-double any single quotes:
+    const unescapedVal = hVal.replaceAll("''", "'");
+    // Make sure the string's length is in the right range:
+    if (valueInBounds(unescapedVal.length, allowList)) {
+      return [true, unescapedVal];
+    }
+    break;
+  case 'decimal':
+    if (REGEX_DECIMAL.test(hVal) && valueInBounds(Number(hVal), [0, 1.0])) {
+      return [true, Number(hVal)];
+    }
+    break;
+  case 'integer':
+    if (REGEX_INTEGER.test(hVal) && valueInBounds(Number(hVal), allowList)) {
+      return [true, Number(hVal)];
+    }
+    break;
+  case 'half':
+    if (REGEX_HALF_NUMBER.test(hVal) && valueInBounds(Number(hVal), allowList)) {
+      return [true, Number(hVal)];
+    }
+    break;
+  case 'whole':
+    if (REGEX_WHOLE_NUMBER.test(hVal) && valueInBounds(Number(hVal), allowList)) {
+      return [true, Number(hVal)];
+    }
+    break;
+  case 'contained':
+    if (REGEX_WHOLE_NUMBER.test(hVal) && valueInBounds(Number(hVal), [0, cfg[allowList[1]]])) {
+      return [true, Number(hVal)];
+    }
+    break;
+  case 'breakpoint':
+    if (REGEX_WHOLE_NUMBER.test(hVal) && valueInBounds(Number(hVal), [0, defaultVal])) {
+      return [true, Number(hVal)];
+    }
+    break;
+  default:
+    break;
+  }
+  // If we could not affirmatively say this value is good:
+  return [false];
+}
+
+// Take a human-friendly setting and make it JS-friendly:
+export const settingHtoC = (hVal, dataType) => {
+  switch (dataType) {
+  case 'whole':
+  case 'half':
+  case 'decimal':
+  case 'integer':
+  case 'contained':
+  case 'breakpoint':
+    return Number(hVal);
+  case 'yn': return REGEX_YES.test(hVal);
+  default: return hVal;
+  }
+}
+
+export class SankeyConfig {
+  // rememberedMoves: Used to track the user's repositioning of specific nodes
+  // (which should be preserved across diagram renders).
+  // Format is: nodeName => [moveX, moveY]
+  #rememberedMoves = new Map();
+  get rememberedMoves() {
+    return this.#rememberedMoves;
+  }
+
+  constructor() {
+    this.config = {};
+  }
+  // colorThemes: The available color arrays to assign to Nodes.
+  colorThemes = COLOR_THEMES;
+}
+
+export const OUTPUT_HEADER_PREFIX = '// SankeyMATIC diagram inputs -';
+export const OUTPUT_SOURCE_URL = '// https://sankeymatic.com/build/';
+export const OUTPUT_USER_DATA_MARKER = '// === Nodes and Flows ===';
+export const OUTPUT_MOVES_MARKER = '// === Moved Nodes ===';
+export const OUTPUT_SETTINGS_MARKER = '// === Settings ===';
+export const OUTPUT_SETTINGS_APPLIED_PREFIX = '// \u2713 '; // u2713 = a little check mark
+
+const REGEX_REMOVE_AUTO_LINES = new RegExp(
+  `^(?:${OUTPUT_HEADER_PREFIX}|${OUTPUT_SETTINGS_APPLIED_PREFIX}|${OUTPUT_SETTINGS_MARKER}|${OUTPUT_USER_DATA_MARKER}|${OUTPUT_SOURCE_URL}|${OUTPUT_MOVES_MARKER}).*$`
+);
+
+// Run through the current input lines & drop any old headers &
+// successfully applied settings. Returns a trimmed string.
+export const removeAutoLines = lines => {
+  return lines
+    .map(l => l.trim())
+    .filter(l => !REGEX_REMOVE_AUTO_LINES.test(l))
+    .join('\n')
+    .replace(/^\n+/, '') // trim blank lines at the start & end
+    .replace(/\n+$/, '');
+}
+
+/**
+ * Produce a text representation of the current diagram, including settings
+ * @param {boolean} verbose - If true, include extra content for humans
+ * @returns {string}
+ */
+export const getDiagramDefinition = verbose => {
+  const outputLines = [];
+  const customOutputFns = new Map([
+    ['list', v => `'${v}'`], // Always quote 'list' values
+    // In a text field we may encounter single-quotes, so double those:
+    ['text', v => `'${v.replaceAll("'", "''")}'`],
+  ]);
+  let currentSettingGroup = '';
+
+  // outputFldName: produce the full field name or an indented short version:
+  function outputFldName(fld) {
+    const shortFieldName = fld.replace(new RegExp(`^${currentSettingGroup}_`), '  ');
+    return shortFieldName.replaceAll('_', ' ');
+  }
+
+  function add(...lines) {
+    outputLines.push(...lines);
+  }
+  function addVerbose(...lines) {
+    if (verbose) add(...lines);
+  }
+
+  addVerbose(`${OUTPUT_HEADER_PREFIX} Saved: ${humanTimestamp()}`)
+  addVerbose(OUTPUT_SOURCE_URL)
+  addVerbose('')
+  addVerbose(OUTPUT_USER_DATA_MARKER)
+  addVerbose('')
+  add(removeAutoLines(elV(USER_INPUTS_FIELD).split('\n')));
+  addVerbose('')
+  addVerbose(OUTPUT_SETTINGS_MARKER)
+  addVerbose('')
+
+  // Add all of the settings:
+  skmSettings.forEach((fldData, fldName) => {
+    if (fldName.startsWith('internal_')) {
+      return;
+    } // Ignore internals
+
+    const dataType = fldData[0];
+    const activeHVal = getHumanValueFromPage(fldName, dataType);
+    const outVal = customOutputFns.has(dataType) ? customOutputFns.get(dataType)(activeHVal) : activeHVal;
+    add(`${outputFldName(fldName)} ${outVal}`);
+    currentSettingGroup = fldName.split('_')[0] || '';
+  });
+
+  // If there are any manually-moved nodes, add them to the output:
+  if (currConfig.rememberedMoves.size) {
+    addVerbose('', OUTPUT_MOVES_MARKER, '');
+    currConfig.rememberedMoves.forEach((move, nodeName) => {
+      add(`move ${nodeName} ${ep(move[0])}, ${ep(move[1])}`);
+    });
+  }
+
+  return outputLines.join('\n');
+}
+
+export const SHARED_LINK_QUERY_PARAM = 'i'
+
+/**
+ * @returns {URL}
+ */
+export const generateLink = (baseUrl = globalThis.location.href) => {
+  const minDiagramDef = getDiagramDefinition(false);
+  const compressed = lzString.compressToEncodedURIComponent(minDiagramDef);
+  const currentUrl = new URL(baseUrl);
+
+  // Set the new parameter, encoded to keep it from wrapping strangely:
+  currentUrl.search
+    = `${SHARED_LINK_QUERY_PARAM}=${
+      encodeURIComponent(compressed).replaceAll('-', '%2D')
+    }`;
+  return currentUrl;
+}
+
+/**
+ * If we are running in the browser context, check for a serialized diagram
+ * in the URL parameters. If found, load it.
+ */
+export function extractFromUrl(baseUrl = globalThis.location.href) {
+  const compressedInputs = new URL(baseUrl)?.searchParams?.get(SHARED_LINK_QUERY_PARAM);
+  if (compressedInputs) {
+    return lzString.decompressFromEncodedURIComponent(compressedInputs);
+  }
+}
+
+export const currConfig = new SankeyConfig();
+export default currConfig;

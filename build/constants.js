@@ -1,6 +1,6 @@
 // constants.js: Reference file with several values used in sankeymatic.js
 
-export const MAXBREAKPOINT = 9999
+import { DEFAULT_MAXBREAKPOINT } from './ux/controls.js';
 // skmSettings = Settings required to render a diagram.
 // Format = field_name: [data type, initial value, allowed values]
 // 'Allowed values' contains different things per data type:
@@ -27,7 +27,7 @@ export const skmSettings = new Map([
   ['node_h', ['half', 50, [0, 100]]],
   ['node_spacing', ['half', 85, [0, 100]]],
   ['node_border', ['contained', 0, [0, 'w']]],
-  ['node_theme', ['radio', 'none', ['a', 'b', 'c', 'd', 'none']]],
+  ['node_theme', ['radio', 'none', ['a', 'b', 'c', 'd', 'e','none']]],
   ['node_color', ['color', '#888888', []]],
   ['node_opacity', ['decimal', 1.0, []]],
   ['flow_curvature', ['decimal', 0.5, []]],
@@ -56,7 +56,7 @@ export const skmSettings = new Map([
   ['labelposition_autoalign', ['integer', 0, [-1, 1]]],
   ['labelposition_scheme', ['radio', 'auto', ['auto', 'per_stage']]],
   ['labelposition_first', ['radio', 'before', ['before', 'after']]],
-  ['labelposition_breakpoint', ['breakpoint', MAXBREAKPOINT, [2]]],
+  ['labelposition_breakpoint', ['breakpoint', DEFAULT_MAXBREAKPOINT, [2]]],
   ['labelpercentage_appears', ['yn', 'n', []]],
   ['labelpercentage_precision', ['whole', 2, [0, 6]]],
   ['labelpercentage_total', ['radio', 'parent', ['parent', 'total']]],
@@ -67,6 +67,7 @@ export const skmSettings = new Map([
   ['themeoffset_b', ['whole', 0, [0, 9]]],
   ['themeoffset_c', ['whole', 0, [0, 7]]],
   ['themeoffset_d', ['whole', 0, [0, 11]]],
+  ['themeoffset_e', ['whole', 0, [0, 9]]],
   ['meta_mentionsankeymatic', ['yn', 'y', []]],
   ['meta_listimbalances', ['yn', 'y', []]],
   // 'internal' settings are never exported, but can be imported:
@@ -76,13 +77,7 @@ export const skmSettings = new Map([
 export const SYM_USE_REMAINDER = '*';
 export const SYM_FILL_MISSING = '?';
 // Some reusable regular expressions to be precompiled:
-export const reWholeNumber = /^\d+$/;
-export const reHalfNumber = /^\d+(?:\.5)?$/;
-export const reInteger = /^-?\d+$/;
-export const reDecimal = /^\d(?:.\d+)?$/;
 export const reCommentLine = /^(?:'|\/\/)/; // Line starts with // or '
-export const reYesNo = /^(?:y|yes|n|no)/i; // = Y/y/Yes/YES/etc. or N/n/No/NO/etc.
-export const reYes = /^(?:y|yes)/i;        // = Y/y/Yes/YES/etc.
 
 // Settings Notes:
 //   * We look for settings & move lines FIRST.
@@ -134,7 +129,7 @@ magnify 100
 // e.g. 'x [...] y #99aa00' or 'x [...] y #99aa00.25'
 export const reFlowLine =    /^\s*(?<sourceNode>.+?)\s*(?<!\\)\[\s*(?<amount>[^\]]*?)\s*(?<!\\)\]\s*(?<targetNode>.*?)\s*(?:#\s*(?<color>[a-f0-9]{3,6})?(?<opacity>\.\d{1,4})?)?\s*$/i;
 export const reTSVFlowLine = /^[ ]*(?<sourceNode>.+?)[ ]*(?<!\\)\t[ ]*(?<amount>[^\t]*?)[ ]*(?<!\\)\t[ ]*(?<targetNode>.*?)\s*(?:#\s*(?<color>[a-f0-9]{3,6})?(?<opacity>\.\d{1,4})?)?\s*$/i;
-export const reCleanValue = /[^\-0-9.*?]/g;
+
 export const reNodeLine = /^:(.+) #([a-f0-9]{0,6})?(\.\d{1,4})?\s*(>>|<<)*\s*(>>|<<)*$/i;
 
 export const reBareColor = /^(?:[a-f0-9]{3}|[a-f0-9]{6})$/i;
@@ -142,7 +137,6 @@ export const reRGBColor = /^#(?:[a-f0-9]{3}|[a-f0-9]{6})$/i;
 export const colorGray60 = '#999';
 
 export const userInputsField = 'flows_in';
-export const breakpointField = 'labelposition_breakpoint';
 
 // Some prime constants for enum values:
 export const [IN, OUT, BEFORE, AFTER] = [13, 17, 19, 23];
