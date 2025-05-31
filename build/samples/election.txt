@@ -1,0 +1,80 @@
+// SankeyMATIC diagram inputs -
+// https://sankeymatic.com/build/
+
+// === Nodes and Flows ===
+
+// Sample Ranked Election diagram
+
+GH\nRound 1 [300000] GH\nRound 2
+EF\nRound 1 [220000] EF\nRound 2
+CD\nRound 1 [200000] CD\nRound 2
+AB\nRound 1 [10000] GH\nRound 2
+AB\nRound 1 [25000] EF\nRound 2
+AB\nRound 1 [20000] CD\nRound 2
+
+GH\nRound 2 [310000] GH\nRound 3\nProjected Winner
+EF\nRound 2 [245000] EF\nRound 3
+CD\nRound 2 [50000] GH\nRound 3\nProjected Winner
+CD\nRound 2 [95000] EF\nRound 3
+
+// This line sets a custom gray color:
+:No further votes #555 <<
+CD\nRound 2 [75000] No further votes
+AB\nRound 1 [20000] No further votes
+
+// === Settings ===
+
+size w 700
+  h 600
+margin l 12
+  r 12
+  t 18
+  b 20
+bg color #ffffff
+  transparent N
+node w 10
+  h 76
+  spacing 85
+  border 0
+  theme a
+  color #777777
+  opacity 1
+flow curvature 0.5
+  inheritfrom source
+  color #999999
+  opacity 0.45
+layout order exact
+  justifyorigins N
+  justifyends N
+  reversegraph N
+  attachincompletesto nearest
+labels color #000000
+  hide N
+  highlight 0.8
+  fontface sans-serif
+  linespacing 0.2
+  relativesize 110
+  magnify 105
+labelname appears Y
+  size 14
+  weight 700
+labelvalue appears Y
+  fullprecision Y
+  position below
+  weight 400
+labelposition autoalign 0
+  scheme auto
+  first before
+  breakpoint 3
+labelpercentage appears N
+  precision 2
+  total parent
+value format ',.'
+  prefix ''
+  suffix ''
+themeoffset a 9
+  b 3
+  c 0
+  d 0
+meta mentionsankeymatic Y
+  listimbalances Y
