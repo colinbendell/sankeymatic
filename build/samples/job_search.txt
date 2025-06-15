@@ -1,0 +1,75 @@
+// SankeyMATIC diagram inputs -
+// https://sankeymatic.com/build/
+
+// === Nodes and Flows ===
+
+// Sample Job Search diagram:
+
+Applications [4] 1st Interviews
+Applications [9] Rejected
+Applications [4] No Answer
+
+1st Interviews [2] 2nd Interviews
+1st Interviews [2] No Offer
+
+2nd Interviews [2] Offers
+
+Offers [1] Accepted
+Offers [1] Declined
+
+// === Settings ===
+
+size w 700
+  h 600
+margin l 12
+  r 12
+  t 18
+  b 20
+bg color #ffffff
+  transparent N
+node w 8
+  h 60
+  spacing 55
+  border 0
+  theme a
+  color #888888
+  opacity 1
+flow curvature 0.5
+  inheritfrom target
+  color #999999
+  opacity 0.45
+layout order automatic
+  justifyorigins N
+  justifyends N
+  reversegraph N
+  attachincompletesto nearest
+labels color #000000
+  hide N
+  highlight 0.55
+  fontface sans-serif
+  linespacing 0.2
+  relativesize 120
+  magnify 95
+labelname appears Y
+  size 17
+  weight 400
+labelvalue appears Y
+  fullprecision Y
+  position above
+  weight 400
+labelposition autoalign 1
+  scheme auto
+  first before
+  breakpoint 3
+labelpercentage appears N
+  precision 2
+  total parent
+value format ',.'
+  prefix ''
+  suffix ''
+themeoffset a 6
+  b 3
+  c 0
+  d 0
+meta mentionsankeymatic Y
+  listimbalances Y

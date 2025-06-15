@@ -1,0 +1,83 @@
+// SankeyMATIC diagram inputs -
+// https://sankeymatic.com/build/
+
+// === Nodes and Flows ===
+
+// Enter Flows between Nodes, like this:
+//         Source [AMOUNT] Target
+
+Wages [1500] Budget
+Other [250] Budget
+
+Budget [450] Taxes
+Budget [420] Housing
+Budget [400] Food
+Budget [255] Transportation
+
+// You can set a Node's color, like this:
+:Budget #057
+//            ...or a color for a single Flow:
+Budget [160] Other Necessities #606
+
+// "[*]" means "Use any amount left over":
+Budget [*] Savings
+
+// Use the controls below to customize
+// your diagram's appearance...
+
+// === Settings ===
+
+size w 600
+  h 600
+margin l 12
+  r 12
+  t 18
+  b 20
+bg color #ffffff
+  transparent N
+node w 12
+  h 50
+  spacing 75
+  border 0
+  theme a
+  color #777777
+  opacity 1
+flow curvature 0.5
+  inheritfrom outside-in
+  color #999999
+  opacity 0.45
+layout order automatic
+  justifyorigins N
+  justifyends N
+  reversegraph N
+  attachincompletesto nearest
+labels color #000000
+  hide N
+  highlight 0.8
+  fontface sans-serif
+  linespacing 0.2
+  relativesize 110
+  magnify 100
+labelname appears Y
+  size 16
+  weight 400
+labelvalue appears Y
+  fullprecision Y
+  position below
+  weight 400
+labelposition autoalign 0
+  scheme auto
+  first before
+  breakpoint 3
+labelpercentage appears N
+  precision 2
+  total parent
+value format ',.'
+  prefix ''
+  suffix ''
+themeoffset a 6
+  b 3
+  c 0
+  d 0
+meta mentionsankeymatic Y
+  listimbalances Y

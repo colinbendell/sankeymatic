@@ -667,64 +667,12 @@ const msg = {
 
 // MARK Loading Sample Graphs
 
-// hideReplaceGraphWarning: Called directly from the page (and from below)
-// Dismiss the note about overwriting the user's current inputs.
-glob.hideReplaceGraphWarning = () => {
-  // Hide the overwrite-warning paragraph (if it's showing)
-  el('replace_graph_warning').style.display = 'none';
-  return null;
-};
-
-// replaceGraphConfirmed: Called directly from the page (and from below).
-// It's ok to overwrite the user's inputs now. Let's go.
-// (Note: In order to reach this code, we have to have already verified the
-// presence of the named recipe, so we don't re-verify.)
-glob.replaceGraphConfirmed = () => {
-  const graphName = elV('demo_graph_chosen'),
-    savedRecipe = sampleDiagramRecipes.get(graphName);
-
-  // Update any settings which accompanied the stored diagram:
-  // In case the new breakpoint > the prior max, reset those now:
-  glob.resetMaxBreakpoint(MAXBREAKPOINT);
-  Object.entries(savedRecipe.settings).forEach(([fld, newVal]) => {
-    const fldData = skmSettings.get(fld),
-      [validSetting, finalValue] = settingIsValid(fldData, newVal, {});
-    if (validSetting) { setValueOnPage(fld, fldData[0], finalValue); }
-  });
-
-  // First, verify that the flow input field is visible.
-  // (If it's been hidden, the setting of flows won't work properly.)
-  const flowsPanel = 'input_options';
-  if (el(flowsPanel).style.display === 'none') {
-    glob.togglePanel(flowsPanel);
-  }
-
-  // Then select all the existing input text...
-  const flowsEl = el(userInputsField);
-  flowsEl.focus();
-  flowsEl.select();
-  // ... then replace it with the new content.
-  flowsEl.setRangeText(savedRecipe.flows, 0, flowsEl.selectionEnd, 'start');
-
-  // Un-focus the input field (on tablets, this keeps the keyboard from
-  // auto-popping-up):
-  flowsEl.blur();
-
-  // If the replace-graph warning is showing, hide it:
-  glob.hideReplaceGraphWarning();
-
-  // Take away any remembered moves (just in case any share a name with a
-  // node in the new diagram) & immediately draw the new diagram::
-  glob.resetMovesAndRender();
-  return null;
-};
-
 // replaceGraph: Called directly from the page.
 // User clicked a button which may cause their work to be erased.
 // Run some checks before we commit...
-glob.replaceGraph = (graphName) => {
+glob.replaceGraph = async (graphName) => {
   // Is there a recipe with the given key? If not, exit early:
-  const savedRecipe = sampleDiagramRecipes.get(graphName);
+  const savedRecipe = await fetch(`samples/${graphName}.txt`).then((r) => r.text());
   if (!savedRecipe) {
     // (This shouldn't happen unless the user is messing around in the DOM)
     msg.add(
@@ -734,28 +682,8 @@ glob.replaceGraph = (graphName) => {
     return null;
   }
 
-  // Set the 'demo_graph_chosen' value according to the user's click:
-  el('demo_graph_chosen').value = graphName;
-
-  // When it's easy to revert to the user's current set of inputs, we don't
-  // bother asking to confirm. This happens in two scenarios:
-  // 1) the inputs are empty, or
-  // 2) the user is looking at inputs which exactly match any of the sample
-  // diagrams.
-  const userInputs = elV(userInputsField),
-    inputsMatchAnySample = Array.from(sampleDiagramRecipes.values())
-      .some((r) => r.flows === userInputs);
-
-  if (inputsMatchAnySample || userInputs === '') {
-    // The user has NOT changed the input from one of the samples,
-    // or the whole field is blank. Go ahead with the change:
-    glob.replaceGraphConfirmed();
-  } else {
-    // Show the warning and do NOT replace the graph:
-    el('replace_graph_warning').style.display = '';
-    el('replace_graph_yes').textContent
-      = `Yes, replace the graph with '${savedRecipe.name}'`;
-  }
+  setUpNewInputs(savedRecipe, highlightSafeValue(graphName));
+  glob.process_sankey();
 
   return null;
 };

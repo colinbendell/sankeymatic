@@ -1,0 +1,89 @@
+// SankeyMATIC diagram inputs -
+// https://sankeymatic.com/build/
+
+// === Nodes and Flows ===
+
+// List each player's moves all at once
+// Use one color for each player
+// Use an amount of 1 for each move
+// Check "Using the exact input order" below
+
+// Experiment with reordering players!
+
+:Player 1: #76a
+Player 1: [1] 1A #76a
+1A [1] 2C #76a
+2C [1] 3E #76a
+3E [1] Player 1 #76a
+:Player 1 #76a
+
+:Player 2: #e37
+Player 2: [1] 1B #e37
+1B [1] 2D #e37
+2D [1] 3E #e37
+3E [1] Player 2 #e37
+:Player 2 #e37
+
+:Player 3: #bb2
+Player 3: [1] 1A #bb2
+1A [1] 2D #bb2
+2D [1] 3E #bb2
+3E [1] Player 3 #bb2
+:Player 3 #bb2
+
+// === Settings ===
+
+size w 600
+  h 400
+margin l 12
+  r 12
+  t 18
+  b 20
+bg color #ffffff
+  transparent N
+node w 12
+  h 23
+  spacing 46
+  border 0
+  theme none
+  color #777777
+  opacity 1
+flow curvature 0.5
+  inheritfrom outside-in
+  color #999999
+  opacity 0.45
+layout order exact
+  justifyorigins N
+  justifyends Y
+  reversegraph N
+  attachincompletesto nearest
+labels color #000000
+  hide N
+  highlight 0.75
+  fontface sans-serif
+  linespacing 0.2
+  relativesize 100
+  magnify 100
+labelname appears Y
+  size 16
+  weight 400
+labelvalue appears N
+  fullprecision Y
+  position below
+  weight 400
+labelposition autoalign 0
+  scheme auto
+  first before
+  breakpoint 3
+labelpercentage appears N
+  precision 2
+  total parent
+value format ',.'
+  prefix ''
+  suffix ''
+themeoffset a 9
+  b 3
+  c 0
+  d 0
+meta mentionsankeymatic Y
+  listimbalances Y

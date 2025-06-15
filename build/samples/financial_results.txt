@@ -1,0 +1,93 @@
+// SankeyMATIC diagram inputs -
+// https://sankeymatic.com/build/
+
+// === Nodes and Flows ===
+
+// Sample Financial Results diagram:
+
+DivisionA [900] Revenue
+DivisionB [750] Revenue
+DivisionC [150] Revenue
+
+Revenue [800] Cost of Sales
+Revenue [1000] Gross Profit
+
+Gross Profit [10] Amortization
+Gross Profit [640] Selling, General &\nAdministration
+Gross Profit [350] Operating Profit
+
+Operating Profit [90] Tax
+Operating Profit [260] Net Profit
+
+// Profit - blue
+:Gross Profit #48e <<
+:Operating Profit #48e <<
+:Net Profit #48e <<
+
+// Expenses - rust
+:Tax #d97 <<
+:Selling, General &\nAdministration #d97 <<
+:Amortization #d97 <<
+
+// Cost - gray
+:Cost of Sales #bbb <<
+
+// main Revenue node: dark grey
+:Revenue #555
+
+// === Settings ===
+
+size w 900
+  h 600
+margin l 12
+  r 12
+  t 18
+  b 20
+bg color #ffffff
+  transparent N
+node w 20
+  h 75
+  spacing 30
+  border 2
+  theme b
+  color #888888
+  opacity 1
+flow curvature 0.5
+  inheritfrom source
+  color #999999
+  opacity 0.45
+layout order automatic
+  justifyorigins N
+  justifyends N
+  reversegraph N
+  attachincompletesto nearest
+labels color #000000
+  hide N
+  highlight 0.8
+  fontface sans-serif
+  linespacing 0.2
+  relativesize 116
+  magnify 113
+labelname appears Y
+  size 18
+  weight 400
+labelvalue appears Y
+  fullprecision Y
+  position below
+  weight 400
+labelposition autoalign 0
+  scheme auto
+  first before
+  breakpoint 3
+labelpercentage appears N
+  precision 2
+  total parent
+value format ',.'
+  prefix '$'
+  suffix ''
+themeoffset a 6
+  b 3
+  c 0
+  d 0
+meta mentionsankeymatic Y
+  listimbalances Y
