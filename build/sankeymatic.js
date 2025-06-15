@@ -9,21 +9,65 @@ Requires:
   canvg.js
     - https://github.com/canvg/canvg v3.0.9
 */
+import {
+  MAXBREAKPOINT,
+  skmSettings,
+  SYM_USE_REMAINDER,
+  SYM_FILL_MISSING,
+  reWholeNumber,
+  reHalfNumber,
+  reInteger,
+  reDecimal,
+  reCommentLine,
+  reYesNo,
+  reYes,
+  reSettingsValue,
+  reSettingsText,
+  reMoveLine,
+  sourceHeaderPrefix,
+  sourceURLLine,
+  userDataMarker,
+  movesMarker,
+  settingsMarker,
+  settingsAppliedPrefix,
+  settingsToBackfill,
+  reFlowLine,
+  reTSVFlowLine,
+  reCleanValue,
+  reNodeLine,
+  reBareColor,
+  reRGBColor,
+  colorGray60,
+  userInputsField,
+  breakpointField,
+  IN,
+  OUT,
+  BEFORE,
+  AFTER,
+  fontMetrics,
+  highlightStyles,
+} from './constants.js';
 
-(function sankeymatic(glob) {
-'use strict';
+import { Sankey } from './sankey.js';
+import { Canvg } from 'canvg'
+import * as d3 from 'd3'
+import lzString from 'lz-string'
 
 // 'glob' points to the global object, either 'window' (browser) or 'global' (node.js)
 // This lets us contain everything in an IIFE (Immediately-Invoked Function Expression)
 
 // el: shorthand for grabbing a DOM element, often to modify it
 // elV: used if all we want is to READ the .value
-function el(domId) { return document.getElementById(domId); }
-function elV(domId) { return document.getElementById(domId).value; }
+function el(domId) {
+  return document.getElementById(domId);
+}
+function elV(domId) {
+  return document.getElementById(domId).value;
+}
 
 // togglePanel: Called directly from the page.
 // Given a panel's name, hide or show that control panel.
-glob.togglePanel = (panel) => {
+globalThis.togglePanel = panel => {
   const panelEl = el(panel),
     displayStyle = panelEl.tagName === 'SPAN' ? 'inline' : '',
     // Set up the new values:
@@ -46,31 +90,35 @@ glob.togglePanel = (panel) => {
 function debounce(callbackFn, waitMilliseconds = 500) {
   let timeoutID;
   const delayedFn = function (...params) {
-    if (timeoutID !== undefined) { clearTimeout(timeoutID); }
+    if (timeoutID !== undefined) {
+      clearTimeout(timeoutID);
+    }
     timeoutID = setTimeout(() => callbackFn(...params), waitMilliseconds);
   };
   return delayedFn;
 }
 
-function outputFieldEl(fld) { return el(`${fld}_val`); }
+function outputFieldEl(fld) {
+  return el(`${fld}_val`);
+}
 
 // We store the breakpoint which means 'never' here for easy reference.
 // When there are valid inputs, this is set to (stages count + 1).
-glob.labelNeverBreakpoint = 9999;
+globalThis.labelNeverBreakpoint = 9999;
 
 /**
  * Update the range on the label-breakpoint slider
  * @param {number} newMax
  */
-glob.resetMaxBreakpoint = (newMax) => {
+globalThis.resetMaxBreakpoint = newMax => {
   const elBreakpointSlider = el(breakpointField);
   elBreakpointSlider.setAttribute('max', String(newMax));
-  glob.labelNeverBreakpoint = newMax;
+  globalThis.labelNeverBreakpoint = newMax;
 };
 
 // updateOutput: Called directly from the page.
 // Given a field's name, update the visible value shown to the user.
-glob.updateOutput = (fld) => {
+globalThis.updateOutput = fld => {
   /**
    * Given a whole number from 50-150, add '%' and pad it if needed.
    * @param {number} pct - number to display as a percentage
@@ -78,7 +126,9 @@ glob.updateOutput = (fld) => {
    */
   function padPercent(pct) {
     const pctS = String(pct);
-    if (pctS.length === 3) { return `${pctS}%`; }
+    if (pctS.length === 3) {
+      return `${pctS}%`;
+    }
     return `<span class="invis">${'0'.repeat(3 - pctS.length)}</span>${pctS}%`;
   }
 
@@ -115,29 +165,31 @@ glob.updateOutput = (fld) => {
     alignLabels = new Map([[-1, 'Before'], [0, 'Centered'], [1, 'After']]),
     fontWeights = { 100: 'Light', 400: 'Normal', 700: 'Bold' };
   switch (formats[fld]) {
-    case '|':
-      // 0.1 is treated as 0 for curvature. Display that:
-      if (fldValAsNum <= 0.1) { oEl.textContent = '0.00'; break; }
-      // FALLS THROUGH to '.2' format when fldValAsNum > 0.1:
-    case '.2': oEl.textContent = d3.format('.2f')(fldValAsNum); break;
-    case '%': oEl.textContent = `${d3.format('.1f')(fldValAsNum)}%`; break;
-    case 'breakpoint':
-      oEl.textContent = fldValAsNum === glob.labelNeverBreakpoint
-            ? 'Never'
-            : `Stage ${fldVal}`;
-      break;
-    case 'font':
-      oEl.textContent = fontWeights[fldValAsNum] ?? fldVal; break;
-    case 'align':
-      oEl.textContent = alignLabels.get(fldValAsNum) ?? fldVal; break;
-    default: oEl.textContent = fldVal;
+  case '|':
+    // 0.1 is treated as 0 for curvature. Display that:
+    if (fldValAsNum <= 0.1) {
+      oEl.textContent = '0.00'; break;
+    }
+    // FALLS THROUGH to '.2' format when fldValAsNum > 0.1:
+  case '.2': oEl.textContent = d3.format('.2f')(fldValAsNum); break;
+  case '%': oEl.textContent = `${d3.format('.1f')(fldValAsNum)}%`; break;
+  case 'breakpoint':
+    oEl.textContent = fldValAsNum === globalThis.labelNeverBreakpoint
+      ? 'Never'
+      : `Stage ${fldVal}`;
+    break;
+  case 'font':
+    oEl.textContent = fontWeights[fldValAsNum] ?? fldVal; break;
+  case 'align':
+    oEl.textContent = alignLabels.get(fldValAsNum) ?? fldVal; break;
+  default: oEl.textContent = fldVal;
   }
   return null;
 };
 
-glob.revealVal = (fld) => {
+globalThis.revealVal = fld => {
   // First make sure the value is up to date.
-  glob.updateOutput(fld);
+  globalThis.updateOutput(fld);
 
   // Swap classes to make the output appear:
   const cl = outputFieldEl(fld).classList;
@@ -146,13 +198,15 @@ glob.revealVal = (fld) => {
   return null;
 };
 
-glob.fadeVal = (fld) => {
+globalThis.fadeVal = fld => {
   outputFieldEl(fld).classList.replace('fade-in', 'fade-out');
   return null;
 };
 
 // isNumeric: borrowed from jQuery/Angular
-function isNumeric(n) { return !Number.isNaN(n - parseFloat(n)); }
+function isNumeric(n) {
+  return !Number.isNaN(n - parseFloat(n));
+}
 
 // clamp: Ensure a value n (if numeric) is between min and max.
 // Default to min if not numeric.
@@ -201,13 +255,17 @@ function parseAmountNumber(value) {
 }
 
 // radioRef: get the object which lets you get/set a radio input value:
-function radioRef(rId) { return document.forms.skm_form.elements[rId]; }
+function radioRef(rId) {
+  return document.forms.skm_form.elements[rId];
+}
 
 // checkRadio: Given a radio field's id, check it.
-glob.checkRadio = (id) => { el(id).checked = true; };
+globalThis.checkRadio = id => {
+  el(id).checked = true;
+};
 
 // If the current inputs came from some external source, name it in this string:
-glob.newInputsImportedFrom = null;
+globalThis.newInputsImportedFrom = null;
 
 /**
  * Used when we're replacing the current diagram with something new - whether
@@ -221,26 +279,26 @@ function setUpNewInputs(newData, dataSource) {
   // original look of older diagrams:
   el(userInputsField).value = settingsToBackfill + newData;
   // Reset breakpoint values to allow a high one in any imported diagram:
-  glob.resetMaxBreakpoint(MAXBREAKPOINT);
-  glob.newInputsImportedFrom = dataSource;
+  globalThis.resetMaxBreakpoint(MAXBREAKPOINT);
+  globalThis.newInputsImportedFrom = dataSource;
 }
 
 // rememberedMoves: Used to track the user's repositioning of specific nodes
 // (which should be preserved across diagram renders).
 // Format is: nodeName => [moveX, moveY]
-glob.rememberedMoves = new Map();
+globalThis.rememberedMoves = new Map();
 
 // resetMovesAndRender: Clear all manual moves of nodes AND re-render the
 // diagram:
-glob.resetMovesAndRender = () => {
-  glob.rememberedMoves.clear();
-  glob.process_sankey();
+globalThis.resetMovesAndRender = () => {
+  globalThis.rememberedMoves.clear();
+  globalThis.process_sankey();
   return null;
 };
 
 function updateResetNodesUI() {
   // Check whether we should enable the 'reset moved nodes' button:
-  el('reset_all_moved_nodes').disabled = !glob.rememberedMoves.size;
+  el('reset_all_moved_nodes').disabled = !globalThis.rememberedMoves.size;
 }
 
 // contrasting_gray_color:
@@ -262,13 +320,13 @@ function contrasting_gray_color(hc) {
 // and for reflecting the user's input back to them in messages.
 function escapeHTML(unsafeString) {
   return unsafeString
-     .replaceAll('→', '&#8594;')
-     .replaceAll('&', '&amp;')
-     .replaceAll('<', '&lt;')
-     .replaceAll('>', '&gt;')
-     .replaceAll('"', '&quot;')
-     .replaceAll("'", '&#039;')
-     .replaceAll('\n', '<br />');
+    .replaceAll('→', '&#8594;')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+    .replaceAll('\n', '<br />');
 }
 
 // ep = "Enough Precision". Converts long decimals to have just 5 digits.
@@ -280,14 +338,18 @@ function escapeHTML(unsafeString) {
 //
 // Result: values like 216.7614485930364 become 216.76145 instead.
 // The 'Number .. toString' call allows shortened output: 8 instead of 8.00000
-function ep(x) { return Number(x.toFixed(5)).toString(); }
+function ep(x) {
+  return Number(x.toFixed(5)).toString();
+}
 
 // updateMarks: given a US-formatted number string, replace with user's
 // preferred separators:
 function updateMarks(stringIn, numberMarks) {
   // If the digit-group mark is a comma, implicitly the decimal is a dot...
   // That's what we start with, so return with no changes:
-  if (numberMarks.group === ',') { return stringIn; }
+  if (numberMarks.group === ',') {
+    return stringIn;
+  }
 
   // Perform hacky mark swap using ! as a placeholder:
   return stringIn.replaceAll(',', '!')
@@ -321,11 +383,11 @@ function initializeDiagram(cfg) {
 // fileTimestamp() => 'yyyymmdd_hhmmss' for the current locale's time.
 // Set up the formatting function once:
 const formatTimestamp = d3.timeFormat('%Y%m%d_%H%M%S');
-glob.fileTimestamp = () => formatTimestamp(new Date());
+globalThis.fileTimestamp = () => formatTimestamp(new Date());
 
 // humanTimestamp() => readable date in the current locale,
 // e.g. "1/3/2023, 7:33:31 PM"
-glob.humanTimestamp = () => new Date().toLocaleString();
+globalThis.humanTimestamp = () => new Date().toLocaleString();
 
 // scaledPNG: Build a data URL for a PNG representing the current diagram:
 function scaledPNG(scale) {
@@ -350,7 +412,7 @@ function scaledPNG(scale) {
   canvasEl.height = scaled.h;
 
   // Give Canvg what it needs to produce a rendered image:
-  const canvgObj = canvg.Canvg.fromString(
+  const canvgObj = Canvg.fromString(
     canvasContext,
     svgContent,
     {
@@ -380,11 +442,11 @@ function downloadADataURL(dataURL, name) {
   newA.remove(); // Discard the Anchor we just clicked; it's no longer needed
 }
 
-glob.saveDiagramAsPNG = (scale) => {
+globalThis.saveDiagramAsPNG = scale => {
   const [size, pngURL] = scaledPNG(scale);
   downloadADataURL(
     pngURL,
-    `sankeymatic_${glob.fileTimestamp()}_${size.w}x${size.h}.png`
+    `sankeymatic_${globalThis.fileTimestamp()}_${size.w}x${size.h}.png`
   );
 };
 
@@ -398,23 +460,23 @@ function downloadATextFile(txt, name) {
 
 // saveDiagramAsSVG: take the current state of 'sankey_svg' and relay
 // it nicely to the user
-glob.saveDiagramAsSVG = () => {
+globalThis.saveDiagramAsSVG = () => {
   // Make a copy of the true SVG & make a few cosmetic changes:
   const svgForExport
   = el('sankey_svg').outerHTML
-    // Take out the id and the class declaration for the background:
+  // Take out the id and the class declaration for the background:
     .replace(' id="sankey_svg"', '')
     .replace(/ class="svg_background_[a-z]+"/, '')
-    // Add a title placeholder & credit comment after the FIRST tag:
+  // Add a title placeholder & credit comment after the FIRST tag:
     .replace(
       />/,
       '>\r\n<title>Your Diagram Title</title>\r\n'
-          + `<!-- Generated with SankeyMATIC: ${glob.humanTimestamp()} -->\r\n`
-      )
-    // Add some line breaks to highlight where [g]roups start/end
-    // and where each path/text/rect begins:
+          + `<!-- Generated with SankeyMATIC: ${globalThis.humanTimestamp()} -->\r\n`
+    )
+  // Add some line breaks to highlight where [g]roups start/end
+  // and where each path/text/rect begins:
     .replace(/><(g|\/g|path|text|rect)/g, '>\r\n<$1');
-  downloadATextFile(svgForExport, `sankeymatic_${glob.fileTimestamp()}.svg`);
+  downloadATextFile(svgForExport, `sankeymatic_${globalThis.fileTimestamp()}.svg`);
 };
 
 // MARK SVG path specification functions
@@ -444,7 +506,7 @@ function flatFlowPathMaker(f) {
 // Used for the "d" attribute on a "path" element when curvature > 0.
 // Defers to flatFlowPathMaker() when the flow is basically horizontal.
 function curvedFlowPathFunction(curvature) {
-  return (f) => {
+  return f => {
     const syC = f.source.y + f.sy + f.dy / 2, // source flow's y center
       tyC = f.target.y + f.ty + f.dy / 2,     // target flow's y center
       sEnd = f.source.x + f.source.dx,  // source's trailing edge
@@ -503,11 +565,15 @@ function settingIsValid(sData, hVal, cfg) {
       rgb = d3.rgb(`#${hVal}`);
     } else { // maybe it's a CSS name like blue/green/lime/maroon/etc.?
       const namedRGB = d3.color(hVal);
-      if (namedRGB) { rgb = namedRGB; }
+      if (namedRGB) {
+        rgb = namedRGB;
+      }
     }
     // If we found a real color spec, return the full 6-char html value.
     // (This fixes the problem of a 3-character color like #789.)
-    if (rgb) { return [true, rgb.formatHex()]; }
+    if (rgb) {
+      return [true, rgb.formatHex()];
+    }
   }
 
   // valueInBounds: Verify a numeric value is in a range.
@@ -546,16 +612,16 @@ function settingIsValid(sData, hVal, cfg) {
       && reWholeNumber.test(hVal)) {
     let [minV, maxV] = [0, 0];
     switch (dataType) {
-      case 'whole': [minV, maxV] = allowList; break;
+    case 'whole': [minV, maxV] = allowList; break;
       // Dynamic values (like margins) should be processed after the
       // diagram's size is set so that we can compare them to their
       // specific containing dimension (that's why they appear later
       // in the settings list):
-      case 'contained': maxV = cfg[allowList[1]]; break;
+    case 'contained': maxV = cfg[allowList[1]]; break;
       // breakpoints: We can't just use the current 'never' value
       // for comparison, since we may be importing a new diagram with
       // a different number of stages:
-      case 'breakpoint': maxV = defaultVal; break;
+    case 'breakpoint': maxV = defaultVal; break;
       // no default
     }
     if (valueInBounds(valAsNum, [minV, maxV])) {
@@ -571,11 +637,11 @@ function settingIsValid(sData, hVal, cfg) {
 function setValueOnPage(sName, dataType, cVal) {
   // console.log(sName, dataType, cVal);
   switch (dataType) {
-    case 'radio': radioRef(sName).value = cVal; break;
+  case 'radio': radioRef(sName).value = cVal; break;
     // cVal is expected to be boolean at this point for checkboxes:
-    case 'yn': el(sName).checked = cVal; break;
+  case 'yn': el(sName).checked = cVal; break;
     // All remaining types (color, list, text, whole/decimal/etc.):
-    default: el(sName).value = cVal;
+  default: el(sName).value = cVal;
   }
 }
 
@@ -583,30 +649,30 @@ function setValueOnPage(sName, dataType, cVal) {
 // Look up a particular setting and return the appropriate human-friendly value
 function getHumanValueFromPage(fName, dataType) {
   switch (dataType) {
-    case 'radio': return radioRef(fName).value;
-    case 'color': return el(fName).value.toLowerCase();
+  case 'radio': return radioRef(fName).value;
+  case 'color': return el(fName).value.toLowerCase();
     // translate true/false BACK to Y/N in this case:
-    case 'yn': return el(fName)?.checked ? 'Y' : 'N';
-    case 'list':
-    case 'text':
-      return el(fName).value;
+  case 'yn': return el(fName)?.checked ? 'Y' : 'N';
+  case 'list':
+  case 'text':
+    return el(fName).value;
     // All remaining types are numeric:
-    default: return Number(el(fName).value);
+  default: return Number(el(fName).value);
   }
 }
 
 // Take a human-friendly setting and make it JS-friendly:
 function settingHtoC(hVal, dataType) {
   switch (dataType) {
-    case 'whole':
-    case 'half':
-    case 'decimal':
-    case 'integer':
-    case 'contained':
-    case 'breakpoint':
-      return Number(hVal);
-    case 'yn': return reYes.test(hVal);
-    default: return hVal;
+  case 'whole':
+  case 'half':
+  case 'decimal':
+  case 'integer':
+  case 'contained':
+  case 'breakpoint':
+    return Number(hVal);
+  case 'yn': return reYes.test(hVal);
+  default: return hVal;
   }
 }
 
@@ -631,29 +697,35 @@ const msg = {
       msgDiv = document.createElement('div');
 
     msgDiv.innerHTML = msgHTML;
-    if (msgData.class.length) { msgDiv.classList.add(msgData.class); }
+    if (msgData.class.length) {
+      msgDiv.classList.add(msgData.class);
+    }
 
     el(msgData.id).append(msgDiv);
   },
   consoleContainer: el('console_area'),
-  log: (msgHTML) => {
+  log: msgHTML => {
     // Reveal the console if it's hidden:
     msg.consoleContainer.style.display = '';
     msg.add(msgHTML, 'console');
   },
   flagsSeen: new Set(),
   logOnce: (flag, msgHTML) => {
-    if (msg.flagsSeen.has(flag)) { return; }
+    if (msg.flagsSeen.has(flag)) {
+      return;
+    }
     msg.log(`<span class="info_text">${msgHTML}</span>`);
     msg.flagsSeen.add(flag);
   },
   queue: [],
-  addToQueue: (msgHTML, msgArea) => { msg.queue.push([msgHTML, msgArea]); },
+  addToQueue: (msgHTML, msgArea) => {
+    msg.queue.push([msgHTML, msgArea]);
+  },
   // Clear out any old messages:
   resetAll: () => {
     Array.from(msg.areas.values())
-      .map((a) => a.id)
-      .forEach((id) => {
+      .map(a => a.id)
+      .forEach(id => {
         el(id).replaceChildren();
       });
     msg.consoleContainer.style.display = 'none';
@@ -661,7 +733,9 @@ const msg = {
   },
   // If any pending messages have been queued, show them:
   showQueued: () => {
-    while (msg.queue.length) { msg.add(...msg.queue.shift()); }
+    while (msg.queue.length) {
+      msg.add(...msg.queue.shift());
+    }
   },
 };
 
@@ -670,7 +744,7 @@ const msg = {
 // replaceGraph: Called directly from the page.
 // User clicked a button which may cause their work to be erased.
 // Run some checks before we commit...
-glob.replaceGraph = async (graphName) => {
+globalThis.replaceGraph = async graphName => {
   // Is there a recipe with the given key? If not, exit early:
   const savedRecipe = await fetch(`samples/${graphName}.txt`).then((r) => r.text());
   if (!savedRecipe) {
@@ -683,7 +757,7 @@ glob.replaceGraph = async (graphName) => {
   }
 
   setUpNewInputs(savedRecipe, highlightSafeValue(graphName));
-  glob.process_sankey();
+  globalThis.process_sankey();
 
   return null;
 };
@@ -727,12 +801,14 @@ function rotateColors(colors, offset) {
 }
 
 // We have to construct this fieldname in a few places:
-function offsetField(key) { return `themeoffset_${key}`; }
+function offsetField(key) {
+  return `themeoffset_${key}`;
+}
 
 // nudgeColorTheme: Called directly from the page.
 // User just clicked an arrow on a color theme.
 // Rotate the theme colors & re-display the diagram with the new set.
-glob.nudgeColorTheme = (themeKey, move) => {
+globalThis.nudgeColorTheme = (themeKey, move) => {
   const themeOffsetEl = el(offsetField(themeKey)),
     currentOffset = (themeOffsetEl === null) ? 0 : themeOffsetEl.value,
     colorsInTheme = approvedColorTheme(themeKey).colorset.length,
@@ -744,7 +820,7 @@ glob.nudgeColorTheme = (themeKey, move) => {
   // If the theme the user is updating is not the active one, switch to it:
   el(`theme_${themeKey}_radio`).checked = true;
 
-  glob.process_sankey();
+  globalThis.process_sankey();
   return null;
 };
 
@@ -753,7 +829,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Set up functions and measurements we will need:
 
   // withUnits: Format a value with the current style.
-  function withUnits(n) { return formatUserData(n, numberStyle); }
+  function withUnits(n) {
+    return formatUserData(n, numberStyle);
+  }
 
   // To measure text sizes, first we make a dummy SVG area the user won't
   // see, with the same size and font details as the real diagram:
@@ -793,7 +871,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
    */
   function addTSpans(d3selection, textObjs, origSize, origX) {
     let prevLineMaxSize = origSize;
-    textObjs.forEach((tspan) => {
+    textObjs.forEach(tspan => {
       // Each span may or may not want a line break before it:
       if (tspan.newLine) {
         // Set up a reasonable spacing given the prior line's maximum font size
@@ -836,7 +914,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   function measureSVGText(txtList, id) {
     const firstEl = txtList[0],
       laterSpans = txtList.slice(1),
-      firstNewLineIndex = laterSpans.findIndex((tspan) => tspan.newLine),
+      firstNewLineIndex = laterSpans.findIndex(tspan => tspan.newLine),
       line1Weight = firstEl.weight ?? cfg.labelname_weight;
 
     // A bit of complicated measuring to deal with here.
@@ -869,12 +947,14 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     if (line1Suffixes.length) {
       addTSpans(textEl, line1Suffixes, line1Size, xC);
       // Update line1Size IF any suffixes were larger:
-      line1Size = Math.max(line1Size, ...line1Suffixes.map((s) => s.size));
+      line1Size = Math.max(line1Size, ...line1Suffixes.map(s => s.size));
     }
     // Measure this height before we add more lines:
     const line1height = textEl.node().getBBox().height;
 
-    if (laterLines.length) { addTSpans(textEl, laterLines, line1Size, xC); }
+    if (laterLines.length) {
+      addTSpans(textEl, laterLines, line1Size, xC);
+    }
     const totalBB = textEl.node().getBBox(); // size after all pieces are added
 
     return {
@@ -920,7 +1000,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
         inner: metrics.inner * emW,
         outer: metrics.outer * emW,
         dyFactor: metrics.dy,
-        };
+      };
     // Compute the remaining values (which depend on values above).
     // lblMarginAfter = total margin to give a label when it is after a node
     //   (Note: this value basically includes m.inner)
@@ -933,17 +1013,12 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     return m;
   }
 
-  const pad = setUpTextDimensions(),
-    // Create the sankey object & the properties needed for the skeleton.
-    // NOTE: The call to d3.sankey().setup() will MODIFY the allNodes and
-    // allFlows objects -- filling in specifics about connections, stages,
-    // etc.
-    sankeyObj = d3.sankey()
-      .nodes(allNodes)
-      .flows(allFlows)
-      .rightJustifyEndpoints(cfg.layout_justifyends)
-      .leftJustifyOrigins(cfg.layout_justifyorigins)
-      .setup();
+  const pad = setUpTextDimensions()
+  // Create the sankey object & the properties needed for the skeleton.
+  // NOTE: The call to d3.sankey().setup() will MODIFY the allNodes and
+  // allFlows objects -- filling in specifics about connections, stages,
+  // etc.
+  const sankeyObj = new Sankey(allNodes, allFlows, cfg.layout_justifyends, cfg.layout_justifyorigins);
 
   // After the .setup() step, Nodes are divided up into Stages.
   // stagesArr = each Stage in the diagram (and the Nodes inside them)
@@ -952,11 +1027,11 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // We need a value meaning 'never'; that's 1 past the (1-based) end of the
   // array, so: length + 1
   const newMax = stagesArr.length + 1,
-    oldMax = glob.labelNeverBreakpoint;
-  // Has the 'never' value changed?
+    oldMax = globalThis.labelNeverBreakpoint;
+    // Has the 'never' value changed?
   if (newMax !== oldMax) {
     // Update the slider's range with the new maximum:
-    glob.resetMaxBreakpoint(newMax);
+    globalThis.resetMaxBreakpoint(newMax);
     // If the stage count has become lower than the breakpoint value, OR
     // if the stage count has increased but the old 'never' value was chosen,
     // we also need to adjust the slider's value to be the new 'never' value:
@@ -979,8 +1054,10 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   if (cfg.internal_revealshadows) {
     // Add a usable tipname since they'll be used (i.e. avoid 'undefined'):
     allNodes
-      .filter((n) => n.isAShadow)
-      .forEach((n) => { n.tipname = '(shadow)'; });
+      .filter(n => n.isAShadow)
+      .forEach(n => {
+        n.tipname = '(shadow)';
+      });
   }
   // MARK Label-measuring time
   // Depending on where labels are meant to be placed, we measure their
@@ -1002,11 +1079,11 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       valueSize = overallSize * (1 + relativeSizeAdjustment),
       total = cfg.labelpercentage_total === 'parent'
         ? n.flows[IN].reduce((prev, cur) => {
-            return prev + cur.source.value;
-          }, 0)
+          return prev + cur.source.value;
+        }, 0)
         : allNodes.reduce((prev, cur) => {
-            return prev + (cur.flows[IN].length == 0 ? cur.value : 0);
-          }, 0),
+          return prev + (cur.flows[IN].length == 0 ? cur.value : 0);
+        }, 0),
       percentage = cfg.labelpercentage_appears && total != 0
         ? String(Number.parseFloat((n.value / total * 100).toFixed(cfg.labelpercentage_precision))) + '%'
         : '',
@@ -1027,15 +1104,19 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
         size: valueSize,
         newLine: ((cfg.labelname_appears || cfg.labelpercentage_appears) && cfg.labelvalue_position === 'below'),
       };
-    if (!cfg.labelvalue_appears && !cfg.labelpercentage_appears) { return nameObjs; }
-    if (!cfg.labelname_appears) { return [valObj]; }
+    if (!cfg.labelvalue_appears && !cfg.labelpercentage_appears) {
+      return nameObjs;
+    }
+    if (!cfg.labelname_appears) {
+      return [valObj];
+    }
     switch (cfg.labelvalue_position) {
-      case 'before': // separate the value from the name with 1 space
-        valObj.txt += ' '; // FALLS THROUGH to 'above'
-      case 'above': return [valObj, ...nameObjs];
-      case 'after': // Add a colon just before the value
-        nameObjs[nameObjs.length - 1].txt += ': '; // FALLS THROUGH
-      default: return [...nameObjs, valObj]; // 'below'
+    case 'before': // separate the value from the name with 1 space
+      valObj.txt += ' '; // FALLS THROUGH to 'above'
+    case 'above': return [valObj, ...nameObjs];
+    case 'after': // Add a colon just before the value
+      nameObjs[nameObjs.length - 1].txt += ': '; // FALLS THROUGH
+    default: return [...nameObjs, valObj]; // 'below'
     }
   }
 
@@ -1058,26 +1139,30 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     }
     // Scheme = 'auto' here. Put the label on the empty side if there is one.
     // We check the *count* of flows in/out, because their sum might be 0:
-    if (!n.flows[IN].length) { return 'end'; }
-    if (!n.flows[OUT].length) { return 'start'; }
+    if (!n.flows[IN].length) {
+      return 'end';
+    }
+    if (!n.flows[OUT].length) {
+      return 'start';
+    }
     switch (cfg.labelposition_autoalign) {
-      case -1: return 'end';
-      case 1: return 'start';
-      default: return 'middle';
+    case -1: return 'end';
+    case 1: return 'start';
+    default: return 'middle';
     }
   }
 
   // Make a function to easily find a value's place in the overall range of
   // Node sizes:
-  const [minVal, maxVal] = d3.extent(allNodes, (n) => n.value),
+  const [minVal, maxVal] = d3.extent(allNodes, n => n.value),
     nodeScaleFn // returns a Number from 0 to 1:
-      = (v) => (minVal === maxVal ? 1 : (v - minVal) / (maxVal - minVal));
+      = v => (minVal === maxVal ? 1 : (v - minVal) / (maxVal - minVal));
 
   // Set up label information for each Node:
   if (cfg.labelname_appears || cfg.labelvalue_appears || cfg.labelpercentage_appears) {
     allNodes.filter(shadowFilter)
-      .filter((n) => !n.hideLabel)
-      .forEach((n) => {
+      .filter(n => !n.hideLabel)
+      .forEach(n => {
         const totalRange = (Math.abs(cfg.labels_magnify - 100) * 2) / 100,
           nFactor = nodeScaleFn(n.value),
           nAbsolutePos = cfg.labels_magnify >= 100 ? nFactor : 1 - nFactor,
@@ -1100,8 +1185,8 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   //   Compute the total space required by the widest label in a stage
   function maxLabelWidth(stageArr, labelsBefore) {
     let maxWidth = 0;
-    stageArr.filter((n) => n.labelList?.length)
-      .forEach((n) => {
+    stageArr.filter(n => n.labelList?.length)
+      .forEach(n => {
         const labelTotalW
           = n.label.bb.w
             + (labelsBefore ? pad.lblMarginBefore : pad.lblMarginAfter)
@@ -1119,9 +1204,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       graphH = cfg.size_h - cfg.margin_t - cfg.margin_b,
       lastStage = stagesArr.length - 1,
       labelsBeforeFirst
-        = stagesArr[0].filter((n) => n.label?.anchor === 'end'),
+        = stagesArr[0].filter(n => n.label?.anchor === 'end'),
       labelsAfterLast
-        = stagesArr[lastStage].filter((n) => n.label?.anchor === 'start'),
+        = stagesArr[lastStage].filter(n => n.label?.anchor === 'start'),
       // If any labels are BEFORE stage 0, get its maxLabelWidth:
       leadingW
         = labelsBeforeFirst.length > 0
@@ -1188,9 +1273,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     = cfg.node_theme === 'none'
       ? [cfg.node_color] // (User wants just one color)
       : rotateColors(
-          approvedColorTheme(cfg.node_theme).colorset,
-          cfg[offsetField(cfg.node_theme)]
-        ),
+        approvedColorTheme(cfg.node_theme).colorset,
+        cfg[offsetField(cfg.node_theme)]
+      ),
     colorScaleFn = d3.scaleOrdinal(userColorArray),
     // Drawing curves with curvature of <= 0.1 looks bad and produces visual
     // artifacts, so let's just take the lowest value on the slider (0.1)
@@ -1207,100 +1292,102 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     darkLabel = (cfg.labels_color.toUpperCase() < '#AAA'),
     // Set up label highlight values:
     hlStyle = highlightStyles[darkLabel ? 'dark' : 'light'];
-    hlStyle.orig.fill_opacity = Number(cfg.labels_highlight);
-    // Given the user's opacity, calculate a reasonable hover
-    // value (2/3 of the distance to 1):
-    hlStyle.hover.fill_opacity = 0.666 + Number(cfg.labels_highlight) / 3;
+  hlStyle.orig.fill_opacity = Number(cfg.labels_highlight);
+  // Given the user's opacity, calculate a reasonable hover
+  // value (2/3 of the distance to 1):
+  hlStyle.hover.fill_opacity = 0.666 + Number(cfg.labels_highlight) / 3;
 
   // stagesMidpoint: Helpful value for deciding if something is in the first
   // or last half of the diagram:
-  function stagesMidpoint() { return (stagesArr.length - 1) / 2; }
+  function stagesMidpoint() {
+    return (stagesArr.length - 1) / 2;
+  }
 
   // Fill in presentation values for each Node (so the render routine
   // doesn't have to do any thinking):
   allNodes.filter(shadowFilter)
-    .forEach((n) => {
-    n.dom_id = `r${n.index}`; // r0, r1... ('r' = '<rect>')
-    // Everything with this class value will move with the Node when it is
-    // dragged:
-    n.css_class = `for_${n.dom_id}`; // for_r0, for_r1...
-    n.tooltip = `${n.tipname}:\n${withUnits(n.value)}`;
-    n.opacity = n.opacity || cfg.node_opacity;
+    .forEach(n => {
+      n.dom_id = `r${n.index}`; // r0, r1... ('r' = '<rect>')
+      // Everything with this class value will move with the Node when it is
+      // dragged:
+      n.css_class = `for_${n.dom_id}`; // for_r0, for_r1...
+      n.tooltip = `${n.tipname}:\n${withUnits(n.value)}`;
+      n.opacity = n.opacity || cfg.node_opacity;
 
-    // Fill in any missing Node colors. (Flows may inherit from these.)
-    if (typeof n.color === 'undefined' || n.color === '') {
-      // Use the first non-blank portion of a label as the basis for
-      // adopting an already-used color or picking a new one.
-      // (Note: this is case sensitive!)
-      // If there are no non-blank strings in the node name, substitute
-      // a word-ish value (rather than crash):
-      const colorKeyString
+      // Fill in any missing Node colors. (Flows may inherit from these.)
+      if (typeof n.color === 'undefined' || n.color === '') {
+        // Use the first non-blank portion of a label as the basis for
+        // adopting an already-used color or picking a new one.
+        // (Note: this is case sensitive!)
+        // If there are no non-blank strings in the node name, substitute
+        // a word-ish value (rather than crash):
+        const colorKeyString
         = (n.tipname?.match(/^\s*(\S+)/) || [null, 'name-is-blank'])[1];
-      // Don't use up colors on shadow nodes:
-      n.color = n.isAShadow ? colorGray60 : colorScaleFn(colorKeyString);
-    }
-    // Now that we're guaranteed a color, we can calculate a border shade:
-    n.border_color
+        // Don't use up colors on shadow nodes:
+        n.color = n.isAShadow ? colorGray60 : colorScaleFn(colorKeyString);
+      }
+      // Now that we're guaranteed a color, we can calculate a border shade:
+      n.border_color
       = darkBg ? d3.rgb(n.color).brighter(2) : d3.rgb(n.color).darker(2);
 
-    // Set up label presentation values:
-    if (n.labelList?.length && !n.hideLabel) {
-      // Which side of the node will the label be on?
-      switch (n.label.anchor) {
+      // Set up label presentation values:
+      if (n.labelList?.length && !n.hideLabel) {
+        // Which side of the node will the label be on?
+        switch (n.label.anchor) {
         case 'start': n.label.x = n.x + n.dx + pad.lblMarginAfter; break;
         case 'end': n.label.x = n.x - pad.lblMarginBefore; break;
         default: n.label.x = n.x + n.dx / 2;
-      }
-      n.label.y = n.y + n.dy / 2; // This is the vcenter of the node
-      // To set the text element's baseline, we have to work with the height
-      // of the first text line in the label:
-      n.label.dy
+        }
+        n.label.y = n.y + n.dy / 2; // This is the vcenter of the node
+        // To set the text element's baseline, we have to work with the height
+        // of the first text line in the label:
+        n.label.dy
         = pad.dyFactor * n.label.bb.line1h
           - (n.label.bb.h - n.label.bb.line1h) / 2;
 
-      // Will there be any highlights? If not, n.label.bg will be null:
-      if (hlStyle.orig.fill_opacity > 0) {
-        n.label.bg = {
-          dom_id: `${n.label.dom_id}_bg`, // label0_bg, label1_bg..
-          offset: {
-            x: n.label.anchor === 'end' ? -pad.outer : -pad.inner,
-            y: -pad.top,
-            w: pad.inner + pad.outer,
-            h: pad.top + pad.bot,
-          },
-          ...hlStyle.orig,
-        };
+        // Will there be any highlights? If not, n.label.bg will be null:
+        if (hlStyle.orig.fill_opacity > 0) {
+          n.label.bg = {
+            dom_id: `${n.label.dom_id}_bg`, // label0_bg, label1_bg..
+            offset: {
+              x: n.label.anchor === 'end' ? -pad.outer : -pad.inner,
+              y: -pad.top,
+              w: pad.inner + pad.outer,
+              h: pad.top + pad.bot,
+            },
+            ...hlStyle.orig,
+          };
+        }
       }
-    }
-  });
+    });
 
   // ...and fill in more Flow details as well:
   allFlows.filter(shadowFilter)
-    .forEach((f) => {
-    f.dom_id = `flow${f.index}`; // flow0, flow1...
-    f.tooltip
+    .forEach(f => {
+      f.dom_id = `flow${f.index}`; // flow0, flow1...
+      f.tooltip
       = `${f.source.tipname} → ${f.target.tipname}: ${withUnits(f.value)}`;
-    // Fill in any missing opacity values and the 'hover' counterparts:
-    f.opacity = f.opacity || cfg.flow_opacity;
-    // Hover opacity = halfway between the user's opacity and 1.0:
-    f.opacity_on_hover = 0.5 + Number(f.opacity) / 2;
+      // Fill in any missing opacity values and the 'hover' counterparts:
+      f.opacity = f.opacity || cfg.flow_opacity;
+      // Hover opacity = halfway between the user's opacity and 1.0:
+      f.opacity_on_hover = 0.5 + Number(f.opacity) / 2;
 
-    // Derive any missing Flow colors.
-    if (f.color === '') {
-      // Stroke Color priority order:
-      // 0. If it's a shadow, just color it gray.
-      // 1. color given directly to the flow (filtered out above)
-      // 2. inheritance-from-node-with-specific-paint-direction
-      // 3. default-inheritance-direction OR default flow color
-      if (f.isAShadow) {
-        f.color = colorGray60;
-      } else if (f.source.paint[AFTER]) {
-        f.color = f.source.color;
-      } else if (f.target.paint[BEFORE]) {
-        f.color = f.target.color;
-      } else {
-        const flowMidpoint = (f.source.stage + f.target.stage) / 2;
-        switch (cfg.flow_inheritfrom) {
+      // Derive any missing Flow colors.
+      if (f.color === '') {
+        // Stroke Color priority order:
+        // 0. If it's a shadow, just color it gray.
+        // 1. color given directly to the flow (filtered out above)
+        // 2. inheritance-from-node-with-specific-paint-direction
+        // 3. default-inheritance-direction OR default flow color
+        if (f.isAShadow) {
+          f.color = colorGray60;
+        } else if (f.source.paint[AFTER]) {
+          f.color = f.source.color;
+        } else if (f.target.paint[BEFORE]) {
+          f.color = f.target.color;
+        } else {
+          const flowMidpoint = (f.source.stage + f.target.stage) / 2;
+          switch (cfg.flow_inheritfrom) {
           case 'source': f.color = f.source.color; break;
           case 'target': f.color = f.target.color; break;
           case 'outside-in':
@@ -1312,21 +1399,21 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
             break;
           case 'none': f.color = cfg.flow_color;
           // no default
+          }
         }
       }
-    }
-    // Set up alternative values to enable the current flow to be
-    // rendered as either flat or curved:
-    // When a flow is FLAT:
-    //  * It's really a parallelogram, so it needs a 'fill' value.
-    //  * We still add a stroke because very angled flows can look too
-    //  thin otherwise. (They still can, even with the stroke.)
-    // When a flow is CURVED:
-    //  * No fill; only stroke-width!
-    //  * stroke-width is set to at least 1px so tiny flows can be seen.
-    f.fill = { flat: f.color, curved: 'none' };
-    f.stroke_width = { flat: 0.5, curved: Math.max(1, f.dy) };
-  });
+      // Set up alternative values to enable the current flow to be
+      // rendered as either flat or curved:
+      // When a flow is FLAT:
+      //  * It's really a parallelogram, so it needs a 'fill' value.
+      //  * We still add a stroke because very angled flows can look too
+      //  thin otherwise. (They still can, even with the stroke.)
+      // When a flow is CURVED:
+      //  * No fill; only stroke-width!
+      //  * stroke-width is set to at least 1px so tiny flows can be seen.
+      f.fill = { flat: f.color, curved: 'none' };
+      f.stroke_width = { flat: 0.5, curved: Math.max(1, f.dy) };
+    });
 
   // At this point, allNodes and allFlows are ready to go. Draw!
 
@@ -1357,15 +1444,15 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   function applyFlowEffects(f, o, s) {
     // Use overall 'opacity' because f might use either a fill or stroke:
     d3.select(`#${f.dom_id}`).attr('opacity', o);
-    [f.source, f.target].filter((n) => n.label?.bg)
-      .forEach((n) => {
+    [f.source, f.target].filter(n => n.label?.bg)
+      .forEach(n => {
         d3.select(`#${n.label.bg.dom_id}`)
           .attr('fill', s.fill)
           .attr('fill-opacity', ep(s.fill_opacity))
           .attr('stroke', s.stroke)
           .attr('stroke-width', ep(s.stroke_width))
           .attr('stroke-opacity', ep(s.stroke_opacity));
-    });
+      });
   }
 
   // Hovering over a flow increases its opacity & highlights the labels of
@@ -1385,32 +1472,34 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Set up the [g]roup of rendered flows:
   // diagFlows = the d3 selection of all flow paths:
   const diagFlows = diagMain.append('g')
-      .attr('id', 'sankey_flows')
-      .selectAll()
-      .data(allFlows.filter(shadowFilter))
-      .enter()
-      .append('path')
-      .attr('id', (f) => f.dom_id)
-      .attr('d', flowPathFn) // set the SVG path for each flow
-      .attr('fill', (f) => f.fill[f.renderAs])
-      .attr('stroke-width', (f) => ep(f.stroke_width[f.renderAs]))
-      .attr('stroke', (f) => f.color)
-      .attr('opacity', (f) => f.opacity)
-      // add emphasis-on-hover behavior:
-      .on('mouseover', turnOnFlowHoverEffects)
-      .on('mouseout', turnOffFlowHoverEffects)
-      // Sort flows to be rendered:
-      // Shadows first (i.e. at the back), then largest-to-smallest
-      // (so if flows cross, the smaller ones are drawn on top):
-      .sort((a, b) => b.isAShadow - a.isAShadow || b.dy - a.dy);
+    .attr('id', 'sankey_flows')
+    .selectAll()
+    .data(allFlows.filter(shadowFilter))
+    .enter()
+    .append('path')
+    .attr('id', f => f.dom_id)
+    .attr('d', flowPathFn) // set the SVG path for each flow
+    .attr('fill', f => f.fill[f.renderAs])
+    .attr('stroke-width', f => ep(f.stroke_width[f.renderAs]))
+    .attr('stroke', f => f.color)
+    .attr('opacity', f => f.opacity)
+    // add emphasis-on-hover behavior:
+    .on('mouseover', turnOnFlowHoverEffects)
+    .on('mouseout', turnOffFlowHoverEffects)
+    // Sort flows to be rendered:
+    // Shadows first (i.e. at the back), then largest-to-smallest
+    // (so if flows cross, the smaller ones are drawn on top):
+    .sort((a, b) => b.isAShadow - a.isAShadow || b.dy - a.dy);
 
   // Add a tooltip for each flow:
-  diagFlows.append('title').text((f) => f.tooltip);
+  diagFlows.append('title').text(f => f.tooltip);
 
   // MARK Drag functions for Nodes
 
   // isAZeroMove: simple test of whether every offset is 0 (no move at all):
-  function isAZeroMove(a) { return a.every((m) => m === 0); }
+  function isAZeroMove(a) {
+    return a.every(m => m === 0);
+  }
 
   // Given a Node index, apply its move to the SVG & remember it for later:
   function applyNodeMove(index) {
@@ -1424,11 +1513,11 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     n.x = Math.max(
       0,
       Math.min(availableW, n.origPos.x + availableW * myXMove)
-      );
+    );
     n.y = Math.max(
       0,
       Math.min(availableH, n.origPos.y + availableH * n.move[1])
-      );
+    );
 
     // Find everything which shares the class of the dragged Node and
     // translate all of them with these offsets.
@@ -1442,7 +1531,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   }
 
   // Set the new starting point of any constrained move:
-  function updateLastNodePosition(n) { n.lastPos = { x: n.x, y: n.y }; }
+  function updateLastNodePosition(n) {
+    n.lastPos = { x: n.x, y: n.y };
+  }
 
   // rememberNodeMove: Save a move so it can be re-applied.
   // The value saved is the % of the available size that the node was moved,
@@ -1453,7 +1544,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     updateLastNodePosition(n);
     if (isAZeroMove(n.move)) {
       // There's no actual move now. If one was stored, forget it:
-      glob.rememberedMoves.delete(n.name);
+      globalThis.rememberedMoves.delete(n.name);
     } else {
       // We save moves keyed to their NAME (not their index), so they
       // can be remembered even when the inputs change their order.
@@ -1461,7 +1552,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       // In the case of a move already remembered, this will replace the
       // original moves with an identical copy...seems less trouble than
       // checking first.
-      glob.rememberedMoves.set(n.name, n.move);
+      globalThis.rememberedMoves.set(n.name, n.move);
     }
     // The count of rememberedMoves may have changed, so also update the UI:
     updateResetNodesUI();
@@ -1475,10 +1566,10 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     // For every flow, update its 'd' path attribute with the new
     // calculated path.
     diagFlows.attr('d', flowPathFn)
-      // (This may *also* change how the flow must be rendered,
-      // so derive those attributes again:)
-      .attr('fill', (f) => f.fill[f.renderAs])
-      .attr('stroke-width', (f) => ep(f.stroke_width[f.renderAs]));
+    // (This may *also* change how the flow must be rendered,
+    // so derive those attributes again:)
+      .attr('fill', f => f.fill[f.renderAs])
+      .attr('stroke-width', f => ep(f.stroke_width[f.renderAs]));
   }
 
   // Show helpful guides/content for the current drag. We put it all in a
@@ -1492,7 +1583,7 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       // doesn't interfere with things like double-clicks on nodes.
       diagHelperLayer = diagMain.insert('g', '#sankey_nodes')
         .attr('id', 'helper_layer')
-        // Set up attributes common to all the stuff inside here..
+      // Set up attributes common to all the stuff inside here..
         .attr('fill', grayColor)
         .attr('fill-opacity', 0.5)
         .attr('stroke', 'none');
@@ -1502,12 +1593,12 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     // place where the drag began (d.lastPos):
     diagHelperLayer.append('path')
       .attr('id', 'helper_lines')
-      // This SVG Path spec means:
-      // [M]ove to the left edge of the graph at this node's top
-      // [h]orizontal line across the whole graph width
-      // [m]ove down by this node's height
-      // [H]orizontal line back to the left edge (x=0)
-      // ..Then the same operation [v]ertically, using this node's width.
+    // This SVG Path spec means:
+    // [M]ove to the left edge of the graph at this node's top
+    // [h]orizontal line across the whole graph width
+    // [m]ove down by this node's height
+    // [H]orizontal line back to the left edge (x=0)
+    // ..Then the same operation [v]ertically, using this node's width.
       .attr('d', `M0 ${ep(n.lastPos.y)} h${ep(graph.w)} m0 ${ep(n.dy)} H0`
            + `M${ep(n.lastPos.x)} 0 v${ep(graph.h)} m${ep(n.dx)} 0 V0`)
       .attr('stroke', grayColor)
@@ -1536,12 +1627,12 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
           .attr('font-weight', '400'),
         hintHeights = graph.h > 350 ? [0.05, 0.95] : [0.4];
       // Show the text so it's visible but not overwhelming:
-      hintHeights.forEach((h) => {
+      hintHeights.forEach(h => {
         shiftHints.append('text')
           .attr('text-anchor', 'middle')
           .attr('x', graph.w / 2)
           .attr('y', graph.h * h)
-         .text('Hold down Shift to move in only one direction');
+          .text('Hold down Shift to move in only one direction');
       });
     }
     return null;
@@ -1566,7 +1657,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       // If they've Shift-dragged, they don't need the hint any more -
       // remove it and don't bring it back until the next gesture.
       const shiftHint = diagMain.select('#helper_shift_hints');
-      if (shiftHint.nodes) { shiftHint.remove(); }
+      if (shiftHint.nodes) {
+        shiftHint.remove();
+      }
     }
 
     // Calculate the percentages we want to save (which will stay
@@ -1590,7 +1683,9 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   function dragNodeEnded(event, n) {
     // Take away the helper guides:
     const helperLayer = diagMain.select('#helper_layer');
-    if (helperLayer.nodes) { helperLayer.remove(); }
+    if (helperLayer.nodes) {
+      helperLayer.remove();
+    }
 
     // After a drag is finished, any new constrained drag should use the
     // _new_ position as 'home'. Therefore we have to set this as the
@@ -1602,8 +1697,10 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     // SVG and PNG - which is not what we want.
     // Therefore, at the end of any drag, turn *off* any lingering
     // hover-effects before we render the PNG+SVG:
-    allFlows.filter((f) => f.hovering)
-      .forEach((f) => { turnOffFlowHoverEffects(null, f); });
+    allFlows.filter(f => f.hovering)
+      .forEach(f => {
+        turnOffFlowHoverEffects(null, f);
+      });
 
     reLayoutDiagram();
     return null;
@@ -1635,13 +1732,13 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Set up Node borders, if specified:
   if (cfg.node_border) {
     diagNodes.append('rect')
-      .attr('id', (n) => `${n.dom_id}_border`)
-      .attr('class', (n) => n.css_class)
-      .attr('x', (n) => ep(n.x))
-      .attr('y', (n) => ep(n.y))
-      .attr('height', (n) => ep(n.dy))
-      .attr('width', (n) => ep(n.dx))
-      .attr('stroke', (n) => n.border_color)
+      .attr('id', n => `${n.dom_id}_border`)
+      .attr('class', n => n.css_class)
+      .attr('x', n => ep(n.x))
+      .attr('y', n => ep(n.y))
+      .attr('height', n => ep(n.dy))
+      .attr('width', n => ep(n.dx))
+      .attr('stroke', n => n.border_color)
       .attr('stroke-width', cfg.node_border)
       .attr('fill', 'none');
   }
@@ -1649,18 +1746,18 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
   // Construct the main <rect>angles for NODEs:
   diagNodes.append('rect')
     // Give a unique ID & class to each rect that we can reference:
-    .attr('id', (n) => n.dom_id)
-    .attr('class', (n) => n.css_class)
-    .attr('x', (n) => ep(n.x))
-    .attr('y', (n) => ep(n.y))
-    .attr('height', (n) => ep(n.dy))
-    .attr('width', (n) => ep(n.dx))
+    .attr('id', n => n.dom_id)
+    .attr('class', n => n.css_class)
+    .attr('x', n => ep(n.x))
+    .attr('y', n => ep(n.y))
+    .attr('height', n => ep(n.dy))
+    .attr('width', n => ep(n.dx))
     // we made sure above there will be a color defined:
-    .attr('fill', (n) => n.color)
-    .attr('fill-opacity', (n) => n.opacity)
+    .attr('fill', n => n.color)
+    .attr('fill-opacity', n => n.opacity)
     // Add tooltips showing node totals:
     .append('title')
-    .text((n) => n.tooltip);
+    .text(n => n.tooltip);
 
   // Create a top layer for labels & highlights, so nodes can't block them:
   const diagLabels = diagMain.append('g')
@@ -1675,15 +1772,15 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       mMargin = Math.round(mSize / 2) - 1,
       mColor
        = cfg.bg_color === '#ffffff' ? '#336781'
-          : contrasting_gray_color(cfg.bg_color);
+         : contrasting_gray_color(cfg.bg_color);
     diagLabels.append('text')
-      // Anchor the text to the midpoint of the canvas (not the graph):
+    // Anchor the text to the midpoint of the canvas (not the graph):
       .attr('text-anchor', 'middle')
-      // x = graphW/2 is wrong when the L/R margins are uneven.. We
-      // have to use the whole width & adjust for the graph's transform:
+    // x = graphW/2 is wrong when the L/R margins are uneven.. We
+    // have to use the whole width & adjust for the graph's transform:
       .attr('x', ep(cfg.size_w / 2 - graph.final_margin_l))
       .attr('y', ep(graph.h + cfg.margin_b - mMargin))
-      // Keep the current font, but make this small & grey:
+    // Keep the current font, but make this small & grey:
       .attr('font-size', `${ep(mSize)}px`)
       .attr('font-weight', '400')
       .attr('fill', mColor)
@@ -1695,62 +1792,62 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
     diagLabels.selectAll()
       .data(allNodes.filter(shadowFilter))
       .enter()
-      .filter((n) => !n.hideLabel)
+      .filter(n => !n.hideLabel)
       .append('text')
-        .attr('id', (n) => n.label.dom_id)
-        // Associate this label with its Node using the CSS class:
-        .attr('class', (n) => n.css_class)
-        .attr('text-anchor', (n) => n.label.anchor)
-        .attr('x', (n) => ep(n.label.x))
-        .attr('y', (n) => ep(n.label.y))
-        .attr('font-weight', (n) => n.labelList[0].weight)
-        .attr('font-size', (n) => `${ep(n.labelList[0].size)}px`)
-        // Nudge the text to be vertically centered:
-        .attr('dy', (n) => ep(n.label.dy))
-        .text((n) => n.labelList[0].txt)
-      .filter((n) => n.labelList.length > 1)
+      .attr('id', n => n.label.dom_id)
+    // Associate this label with its Node using the CSS class:
+      .attr('class', n => n.css_class)
+      .attr('text-anchor', n => n.label.anchor)
+      .attr('x', n => ep(n.label.x))
+      .attr('y', n => ep(n.label.y))
+      .attr('font-weight', n => n.labelList[0].weight)
+      .attr('font-size', n => `${ep(n.labelList[0].size)}px`)
+    // Nudge the text to be vertically centered:
+      .attr('dy', n => ep(n.label.dy))
+      .text(n => n.labelList[0].txt)
+      .filter(n => n.labelList.length > 1)
       .each(function handleSpans(n) {
-          addTSpans(d3.select(this), n.labelList.slice(1), n.labelList[0].size, n.label.x);
-        });
+        addTSpans(d3.select(this), n.labelList.slice(1), n.labelList[0].size, n.label.x);
+      });
 
     // For any nodes with a label highlight defined, render it:
     allNodes.filter(shadowFilter)
-      .filter((n) => n.label?.bg)
-      .forEach((n) => {
-      // Use each label's size to make custom round-rects underneath:
-      const labelTextSelector = `#${n.label.dom_id}`,
-        labelBB
+      .filter(n => n.label?.bg)
+      .forEach(n => {
+        // Use each label's size to make custom round-rects underneath:
+        const labelTextSelector = `#${n.label.dom_id}`,
+          labelBB
           = diagLabels.select(labelTextSelector).node().getBBox(),
-        bg = n.label.bg;
-      // Put the highlight rectangle just before each text:
-      diagLabels.insert('rect', labelTextSelector)
-        .attr('id', bg.dom_id)
+          bg = n.label.bg;
+        // Put the highlight rectangle just before each text:
+        diagLabels.insert('rect', labelTextSelector)
+          .attr('id', bg.dom_id)
         // Attach a class to make a drag operation affect a Node's label too:
-        .attr('class', n.css_class)
-        .attr('x', ep(labelBB.x + bg.offset.x))
-        .attr('y', ep(labelBB.y + bg.offset.y))
-        .attr('width', ep(labelBB.width + bg.offset.w))
-        .attr('height', ep(labelBB.height + bg.offset.h))
-        .attr('rx', ep(cfg.labelname_size / 4))
-        .attr('fill', bg.fill)
-        .attr('fill-opacity', ep(bg.fill_opacity))
-        .attr('stroke', bg.stroke)
-        .attr('stroke-width', ep(bg.stroke_width))
-        .attr('stroke-opacity', ep(bg.stroke_opacity));
-    });
+          .attr('class', n.css_class)
+          .attr('x', ep(labelBB.x + bg.offset.x))
+          .attr('y', ep(labelBB.y + bg.offset.y))
+          .attr('width', ep(labelBB.width + bg.offset.w))
+          .attr('height', ep(labelBB.height + bg.offset.h))
+          .attr('rx', ep(cfg.labelname_size / 4))
+          .attr('fill', bg.fill)
+          .attr('fill-opacity', ep(bg.fill_opacity))
+          .attr('stroke', bg.stroke)
+          .attr('stroke-width', ep(bg.stroke_width))
+          .attr('stroke-opacity', ep(bg.stroke_opacity));
+      });
   }
 
   // Now that all of the SVG nodes and labels exist, it's time to re-apply
   // any remembered moves:
-  if (glob.rememberedMoves.size) {
+  if (globalThis.rememberedMoves.size) {
     // Make a copy of the list of moved-Node names (so we can destroy it):
-    const movedNodes = new Set(glob.rememberedMoves.keys());
+    const movedNodes = new Set(globalThis.rememberedMoves.keys());
 
     // Look for all node objects matching a name in the list:
     allNodes.filter(shadowFilter)
-      .filter((n) => movedNodes.has(n.name))
-      .forEach((n) => {
-        n.move = glob.rememberedMoves.get(n.name);
+      .filter(n => movedNodes.has(n.name))
+      .forEach(n => {
+        n.move = globalThis.rememberedMoves.get(n.name);
         // Make this move visible in the diagram:
         applyNodeMove(n.index);
         updateLastNodePosition(n);
@@ -1763,8 +1860,8 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
       });
     // Any remaining items in movedNodes must refer to Nodes which are no
     // longer with us. Delete those from the global memory:
-    movedNodes.forEach((nodeName) => {
-      glob.rememberedMoves.delete(nodeName);
+    movedNodes.forEach(nodeName => {
+      globalThis.rememberedMoves.delete(nodeName);
     });
 
     // Re-layout the diagram once, after all of the above moves:
@@ -1778,12 +1875,12 @@ function render_sankey(allNodes, allFlows, cfg, numberStyle) {
 // successfully applied settings. Returns a trimmed string.
 function removeAutoLines(lines) {
   return lines
-    .filter((l) => !(
+    .filter(l => !(
       l.startsWith(sourceHeaderPrefix)
       || l.startsWith(settingsAppliedPrefix)
       || [settingsMarker, userDataMarker, sourceURLLine, movesMarker]
-          .includes(l)
-      ))
+        .includes(l)
+    ))
     .join('\n')
     .replace(/^\n+/, '') // trim blank lines at the start & end
     .replace(/\n+$/, '');
@@ -1797,9 +1894,9 @@ function removeAutoLines(lines) {
 function getDiagramDefinition(verbose) {
   const outputLines = [],
     customOutputFns = new Map([
-      ['list', (v) => `'${v}'`], // Always quote 'list' values
+      ['list', v => `'${v}'`], // Always quote 'list' values
       // In a text field we may encounter single-quotes, so double those:
-      ['text', (v) => `'${v.replaceAll("'", "''")}'`],
+      ['text', v => `'${v.replaceAll("'", "''")}'`],
     ]);
   let currentSettingGroup = '';
 
@@ -1807,27 +1904,35 @@ function getDiagramDefinition(verbose) {
   function outputFldName(fld) {
     const prefixLen = currentSettingGroup.length,
       shortFldName = prefixLen && fld.startsWith(`${currentSettingGroup}_`)
-      ? `  ${fld.substring(prefixLen + 1)}`
-      : fld;
+        ? `  ${fld.substring(prefixLen + 1)}`
+        : fld;
     return shortFldName.replaceAll('_', ' ');
   }
 
-  function add(...lines) { outputLines.push(...lines); }
-  function addIfV(...lines) { if (verbose) { add(...lines); } }
+  function add(...lines) {
+    outputLines.push(...lines);
+  }
+  function addIfV(...lines) {
+    if (verbose) {
+      add(...lines);
+    }
+  }
 
   addIfV(
-    `${sourceHeaderPrefix} Saved: ${glob.humanTimestamp()}`,
+    `${sourceHeaderPrefix} Saved: ${globalThis.humanTimestamp()}`,
     sourceURLLine,
     '',
     userDataMarker,
     ''
-    );
+  );
   add(removeAutoLines(elV(userInputsField).split('\n')));
   addIfV('', settingsMarker, '');
 
   // Add all of the settings:
   skmSettings.forEach((fldData, fldName) => {
-    if (fldName.startsWith('internal_')) { return; } // Ignore internals
+    if (fldName.startsWith('internal_')) {
+      return;
+    } // Ignore internals
 
     const dataType = fldData[0],
       activeHVal = getHumanValueFromPage(fldName, dataType),
@@ -1839,9 +1944,9 @@ function getDiagramDefinition(verbose) {
   });
 
   // If there are any manually-moved nodes, add them to the output:
-  if (glob.rememberedMoves.size) {
+  if (globalThis.rememberedMoves.size) {
     addIfV('', movesMarker, '');
-    glob.rememberedMoves.forEach((move, nodeName) => {
+    globalThis.rememberedMoves.forEach((move, nodeName) => {
       add(`move ${nodeName} ${ep(move[0])}, ${ep(move[1])}`);
     });
   }
@@ -1858,9 +1963,9 @@ const urlInputsParam = 'i',
  */
 function generateLink() {
   const minDiagramDef = getDiagramDefinition(false),
-    compressed = LZString.compressToEncodedURIComponent(minDiagramDef),
-    currentUrl = new URL(glob.location.href);
-  // Set the new parameter, encoded to keep it from wrapping strangely:
+    compressed = lzString.compressToEncodedURIComponent(minDiagramDef),
+    currentUrl = new URL(globalThis.location.href);
+    // Set the new parameter, encoded to keep it from wrapping strangely:
   currentUrl.search
     = `${urlInputsParam}=${
       encodeURIComponent(compressed).replaceAll('-', '%2D')
@@ -1870,25 +1975,27 @@ function generateLink() {
 
 // MARK Save/Load diagram definitions in text files
 
-glob.saveDiagramToFile = () => {
+globalThis.saveDiagramToFile = () => {
   const verboseDiagramDef = getDiagramDefinition(true);
   downloadATextFile(
     verboseDiagramDef,
-    `sankeymatic_${glob.fileTimestamp()}_source.txt`
+    `sankeymatic_${globalThis.fileTimestamp()}_source.txt`
   );
 };
 
-glob.loadDiagramFile = async () => {
+globalThis.loadDiagramFile = async () => {
   const fileList = el('load_diagram_from_file').files;
 
   // Did the user provide a file?
-  if (fileList.length === 0) { return; }
+  if (fileList.length === 0) {
+    return;
+  }
 
   // Read the file's text contents:
   const uploadedText = await fileList[0].text(),
     userFileName = fileList[0].name;
   setUpNewInputs(uploadedText, highlightSafeValue(userFileName));
-  glob.process_sankey();
+  globalThis.process_sankey();
 };
 
 // MARK dialog functions
@@ -1896,12 +2003,14 @@ glob.loadDiagramFile = async () => {
 /**
  * @param {string} dId - the ID of the dialog element to close (minus 'Dialog')
  */
-glob.closeDialog = (dId) => {
+globalThis.closeDialog = dId => {
   const dEl = el(`${dId}Dialog`);
-  if (dEl) { dEl.close(); }
+  if (dEl) {
+    dEl.close();
+  }
 };
 
-glob.openGetLinkDialog = () => {
+globalThis.openGetLinkDialog = () => {
   const dEl = el('getLinkDialog');
   if (dEl) {
     dEl.showModal();
@@ -1913,11 +2022,13 @@ glob.openGetLinkDialog = () => {
   }
 };
 
-glob.copyGeneratedLink = () => {
-  if (glob.navigator?.clipboard) {
-    glob.navigator.clipboard.writeText(el(linkTargetDiv).innerText);
+globalThis.copyGeneratedLink = () => {
+  if (globalThis.navigator?.clipboard) {
+    globalThis.navigator.clipboard.writeText(el(linkTargetDiv).innerText);
     el(copiedMsgId).innerText = 'Copied!';
-    setTimeout(() => { el(copiedMsgId).innerText = ''; }, 2000);
+    setTimeout(() => {
+      el(copiedMsgId).innerText = '';
+    }, 2000);
   }
 };
 
@@ -1925,14 +2036,12 @@ glob.copyGeneratedLink = () => {
  * If we are running in the browser context, check for a serialized diagram
  * in the URL parameters. If found, load it.
  */
-function loadFromQueryString() {
-  const searchString = glob.location?.search;
+export function loadFromQueryString() {
+  const searchString = globalThis.location?.search;
   if (searchString) {
-    const compressedInputs
-      = new URLSearchParams(searchString)?.get(urlInputsParam);
+    const compressedInputs = new URLSearchParams(searchString)?.get(urlInputsParam);
     if (compressedInputs) {
-      const expandedInputs
-        = LZString.decompressFromEncodedURIComponent(compressedInputs);
+      const expandedInputs = lzString.decompressFromEncodedURIComponent(compressedInputs);
       // Make sure the input was successfully read.
       // (LZstring gives back a blank string or a null when it fails):
       if (expandedInputs) {
@@ -1953,7 +2062,7 @@ function loadFromQueryString() {
 // MAIN FUNCTION:
 // process_sankey: Called directly from the page and within this script.
 // Gather inputs from user; validate them; render updated diagram
-glob.process_sankey = () => {
+globalThis.process_sankey = () => {
   let [maxDecimalPlaces, maxNodeIndex, maxNodeVal] = [0, 0, 0];
   const uniqueNodes = new Map();
 
@@ -1972,10 +2081,10 @@ glob.process_sankey = () => {
         colorset = rotateColors(theme.colorset, themeOffset),
         // Show the array rotated properly given the offset:
         renderedGuide = colorset
-          .map((c) => makeSpanTag(c, colorset.length, theme.d3Name))
+          .map(c => makeSpanTag(c, colorset.length, theme.d3Name))
           .join('');
-        // SOMEDAY: Add an indicator for which colors are/are not
-        // in use?
+      // SOMEDAY: Add an indicator for which colors are/are not
+      // in use?
       el(`theme_${t}_guide`).innerHTML = renderedGuide;
       el(`theme_${t}_label`).textContent = theme.nickname;
     }
@@ -2012,7 +2121,9 @@ glob.process_sankey = () => {
       thisNode = uniqueNodes.get(trueName); // Does this node exist?
     if (thisNode) {
       // If so, should the new row # replace the stored row #?:
-      if (thisNode.sourceRow > row) { thisNode.sourceRow = row; }
+      if (thisNode.sourceRow > row) {
+        thisNode.sourceRow = row;
+      }
       // Update hideLabel if this instance of the name was struck through:
       thisNode.hideLabel ||= hideLabel;
       return thisNode;
@@ -2078,16 +2189,16 @@ glob.process_sankey = () => {
   // As part of this step, we make sure to drop any zero-width spaces
   // which may have been appended or prepended to lines (e.g. when pasted
   // from PowerPoint), then trim again.
-  const origSourceLines = elV(userInputsField).split('\n'),
-    sourceLines = origSourceLines.map(
-      (l) => l.trim()
-        .replace(/^\u200B+/, '')
-        .replace(/\u200B+$/, '')
-        .trim()
-    ),
-    invalidLines = [], // contains objects with a 'value' and 'message'
-    linesWithSettings = new Set(),
-    linesWithValidSettings = new Set();
+  const origSourceLines = elV(userInputsField).split('\n');
+  const sourceLines = origSourceLines.map(
+    l => l.trim()
+      .replace(/^\u200B+/, '')
+      .replace(/\u200B+$/, '')
+      .trim()
+  );
+  const invalidLines = []; // contains objects with a 'value' and 'message'
+  const linesWithSettings = new Set();
+  const linesWithValidSettings = new Set();
 
   function warnAbout(line, warnMsg) {
     invalidLines.push({ value: line, message: warnMsg });
@@ -2104,7 +2215,7 @@ glob.process_sankey = () => {
       // We don't verify the name because we don't yet know the list to
       // match against. Assume the node names are provided in good faith.
       const [nodeName, moveX, moveY] = moveParts.slice(-3);
-      glob.rememberedMoves.set(nodeName, [Number(moveX), Number(moveY)]);
+      globalThis.rememberedMoves.set(nodeName, [Number(moveX), Number(moveY)]);
       linesWithValidSettings.add(row);
       return;
     }
@@ -2127,8 +2238,8 @@ glob.process_sankey = () => {
       // fix it up so it's just the 1st letter so it will work:
       'width height left right top bottom' // => w, h, l, r, t, b
         .split(' ')
-        .filter((l) => settingName.endsWith(l))
-        .forEach((long) => {
+        .filter(l => settingName.endsWith(l))
+        .forEach(long => {
           settingName = settingName.replace(long, long[0]);
         });
 
@@ -2174,104 +2285,103 @@ glob.process_sankey = () => {
   });
 
   //  Parse inputs into: approvedNodes, approvedFlows
-  const goodFlows = [],
-    approvedNodes = [],
-    approvedFlows = [];
+  const goodFlows = [];
+  const approvedNodes = [];
+  const approvedFlows = [];
 
   // Loop through all the non-setting input lines:
   sourceLines.filter((l, i) => !linesWithSettings.has(i))
     .forEach((lineIn, row) => {
-    // Is it a blank line OR a comment? Skip it entirely:
-    if (lineIn === '' || reCommentLine.test(lineIn)) {
-      return;
-    }
-
-    // Does this line look like a Node?
-    let matches = lineIn.match(reNodeLine);
-    if (matches !== null) {
-      // Save/update it in the uniqueNodes structure:
-      updateNodeAttrs({
-        name: matches[1].trim(),
-        color: matches[2],
-        opacity: matches[3],
-        paintInputs: [matches[4], matches[5]],
-        sourceRow: row,
-      });
-      // No need to process this as a Data line, let's move on:
-      return;
-    }
-
-    // attempt classic regex match
-    let [, source, amount, target, color, opacity] = lineIn.match(reFlowLine) || lineIn.match(reTSVFlowLine) || [];
-
-    const trialTarget = parseAmountNumber(target);
-    const trialAmount = parseAmountNumber(amount);
-    if (trialAmount === null && trialTarget !== null) {
-      target = amount;
-      amount = trialTarget;
-    }
-    else {
-      amount = trialAmount;
-    }
-    if (source && target) {
-      // Is the Amount actually blank? Treat that like a comment (but log it):
-      if (amount === '') {
-        msg.log(`<span class="info_text">Skipped empty flow:</span> ${escapeHTML(lineIn)}`);
+      // Is it a blank line OR a comment? Skip it entirely:
+      if (lineIn === '' || reCommentLine.test(lineIn)) {
         return;
       }
 
-      // Is Amount a number or a special operation?
-      // Reject the line if it's neither:
-      if (amount === null) {
-        warnAbout(
-          lineIn,
-          `The [Amount] must be a number in the form #.# or a wildcard ("${SYM_USE_REMAINDER}" or "${SYM_FILL_MISSING}").`
+      // Does this line look like a Node?
+      let matches = lineIn.match(reNodeLine);
+      if (matches !== null) {
+        // Save/update it in the uniqueNodes structure:
+        updateNodeAttrs({
+          name: matches[1].trim(),
+          color: matches[2],
+          opacity: matches[3],
+          paintInputs: [matches[4], matches[5]],
+          sourceRow: row,
+        });
+        // No need to process this as a Data line, let's move on:
+        return;
+      }
+
+      // attempt classic regex match
+      let [, source, amount, target, color, opacity] = lineIn.match(reFlowLine) || lineIn.match(reTSVFlowLine) || [];
+
+      const trialTarget = parseAmountNumber(target);
+      const trialAmount = parseAmountNumber(amount);
+      if (trialAmount === null && trialTarget !== null) {
+        target = amount;
+        amount = trialTarget;
+      } else {
+        amount = trialAmount;
+      }
+      if (source && target) {
+        // Is the Amount actually blank? Treat that like a comment (but log it):
+        if (amount === '') {
+          msg.log(`<span class="info_text">Skipped empty flow:</span> ${escapeHTML(lineIn)}`);
+          return;
+        }
+
+        // Is Amount a number or a special operation?
+        // Reject the line if it's neither:
+        if (amount === null) {
+          warnAbout(
+            lineIn,
+            `The [Amount] must be a number in the form #.# or a wildcard ("${SYM_USE_REMAINDER}" or "${SYM_FILL_MISSING}").`
+          );
+          return;
+        }
+        // Diagrams don't currently support negative numbers:
+        if (Number(amount) < 0) {
+          warnAbout(lineIn, 'Amounts must not be negative');
+          return;
+        }
+
+        color = color ? "#" + color : "";
+        opacity = opacity ? opacity : "";
+
+        // All seems well, save it as good:
+        goodFlows.push({
+          source,
+          target,
+          amount,
+          sourceRow: row,
+          // Remember any special symbol even after the amount will be known:
+          operation: isCalculated(amount) ? amount : null,
+          color,
+          opacity,
+        });
+
+        // We need to know the maximum precision of the inputs (greatest
+        // # of characters to the RIGHT of the decimal) for some error
+        // checking operations (& display) later:
+        maxDecimalPlaces = Math.max(
+          maxDecimalPlaces,
+          ((amount + '').split('.')[1] || '').length
         );
         return;
       }
-      // Diagrams don't currently support negative numbers:
-      if (Number(amount) < 0) {
-        warnAbout(lineIn, 'Amounts must not be negative');
-        return;
-      }
 
-      color = color ? "#" + color : "";
-      opacity = opacity ? opacity : "";
-
-      // All seems well, save it as good:
-      goodFlows.push({
-        source,
-        target,
-        amount,
-        sourceRow: row,
-        // Remember any special symbol even after the amount will be known:
-        operation: isCalculated(amount) ? amount : null,
-        color,
-        opacity,
-      });
-
-      // We need to know the maximum precision of the inputs (greatest
-      // # of characters to the RIGHT of the decimal) for some error
-      // checking operations (& display) later:
-      maxDecimalPlaces = Math.max(
-        maxDecimalPlaces,
-        ((amount + '').split('.')[1] || '').length
+      // This is a non-blank line which did not match any pattern:
+      warnAbout(
+        lineIn,
+        'Does not match the format of a Flow or Node or Setting'
       );
-      return;
-    }
-
-    // This is a non-blank line which did not match any pattern:
-    warnAbout(
-      lineIn,
-      'Does not match the format of a Flow or Node or Setting'
-      );
-  });
+    });
 
   // TODO: Disable useless precision checkbox if maxDecimalPlaces === 0
   // TODO: Look for cycles and post errors about them
 
   // Mention any un-parseable lines:
-  invalidLines.forEach((parsingError) => {
+  invalidLines.forEach(parsingError => {
     msg.add(
       `${parsingError.message}: ${highlightSafeValue(parsingError.value)}`,
       'issue'
@@ -2280,16 +2390,16 @@ glob.process_sankey = () => {
 
   // Make the final list of Flows, linked to their Node objects:
   const graphIsReversed = el('layout_reversegraph').checked;
-  goodFlows.forEach((flow) => {
+  goodFlows.forEach(flow => {
     const thisFlow = {
-        hovering: false,
-        index: approvedFlows.length,
-        sourceRow: flow.sourceRow,
-        operation: flow.operation,
-        value: flow.amount,
-        color: flow.color,
-        opacity: flow.opacity,
-      };
+      hovering: false,
+      index: approvedFlows.length,
+      sourceRow: flow.sourceRow,
+      operation: flow.operation,
+      value: flow.amount,
+      color: flow.color,
+      opacity: flow.opacity,
+    };
 
     // Make sure the node names get saved; it may be their only appearance:
     thisFlow.source = setUpNode(flow.source, flow.sourceRow);
@@ -2321,12 +2431,12 @@ glob.process_sankey = () => {
       [SYM_FILL_MISSING]: { leaving: intoTarget, arriving: outOfSource },
     },
     // Make a handy set containing all calculating flows:
-    queueOfFlows = new Set(approvedFlows.filter((flow) => flow.operation)),
+    queueOfFlows = new Set(approvedFlows.filter(flow => flow.operation)),
     // Track each Node touched by a calculated flow:
     involvedNodes = new Set();
-  // Now, store in each Node references to each unknown Flow touching it.
-  // Later we'll use the counts of unkonwns.
-  queueOfFlows.forEach((f) => {
+    // Now, store in each Node references to each unknown Flow touching it.
+    // Later we'll use the counts of unkonwns.
+  queueOfFlows.forEach(f => {
     const k = calculationKeys[f.operation];
     // Add references to the unknowns to their related Nodes.
     f[k.leaving.node].unknowns[k.leaving.dir].add(f);
@@ -2340,7 +2450,7 @@ glob.process_sankey = () => {
     // For each involvedNode: is it an endpoint or origin?
     // (Terminal nodes have an implicit additional unknown side.)
     // We'd rather check with n.flows[].length, but that's not set up yet.
-    approvedFlows.forEach((f) => {
+    approvedFlows.forEach(f => {
       // Initialize the struct if it's not present. Begin with both = true.
       f.source.terminates ??= { [IN]: true, [OUT]: true };
       f.target.terminates ??= { [IN]: true, [OUT]: true };
@@ -2381,11 +2491,11 @@ glob.process_sankey = () => {
     let [parentTotal, siblingTotal] = [0, 0];
     approvedFlows
       .filter(
-        (af) => !isCalculated(af.value)
+        af => !isCalculated(af.value)
           && [af[k.arriving.node].name, af[k.leaving.node].name]
             .includes(parentN.name)
       )
-      .forEach((af) => {
+      .forEach(af => {
         if (parentN.name === af[k.arriving.node].name) {
           // Add up amounts arriving at the parent from the other side:
           parentTotal += Number(af.value);
@@ -2412,13 +2522,15 @@ glob.process_sankey = () => {
    * @param {object} flow - the specific flow to test
    * @returns true when the unknown count for the flow's parent is exactly 1
    */
-  function has_one_unknown(flow) { return parentUnknowns.get(flow) === 1; }
+  function has_one_unknown(flow) {
+    return parentUnknowns.get(flow) === 1;
+  }
 
   // Now, resolve the flows in order from most certain to least certain:
   while (queueOfFlows.size) {
     // First, (re)calculate every flow's count of unknowns on its parent:
     parentUnknowns.clear();
-    queueOfFlows.forEach((f) => {
+    queueOfFlows.forEach(f => {
       const k = calculationKeys[f.operation],
         parentN = f[k.leaving.node];
       // If an unknown flow connects to a terminating node, it should be ranked
@@ -2453,8 +2565,8 @@ glob.process_sankey = () => {
     if (has_one_unknown(sortedFlows[0])) {
       // We have /at least/ one. Resolve all the singletons we can!
       sortedFlows
-        .filter((f) => has_one_unknown(f))
-        .forEach((f) => resolveEligibleFlow(f));
+        .filter(f => has_one_unknown(f))
+        .forEach(f => resolveEligibleFlow(f));
     } else {
       // Here we had _no_ internal singletons. We will resolve ONE ambiguous
       // flow, then loop again to look for any resulting fresh singletons.
@@ -2468,10 +2580,10 @@ glob.process_sankey = () => {
   // appearance in the source:
   Array.from(uniqueNodes.values())
     .sort((a, b) => a.sourceRow - b.sourceRow)
-    .forEach((n) => {
+    .forEach(n => {
       // Set up color inheritance signals from '<<' and '>>' indicators:
-      const paintL = n.paintInputs.some((s) => s === '<<'),
-        paintR = n.paintInputs.some((s) => s === '>>');
+      const paintL = n.paintInputs.some(s => s === '<<'),
+        paintR = n.paintInputs.some(s => s === '>>');
       // If the graph is reversed, swap the directions:
       n.paint = {
         [BEFORE]: graphIsReversed ? paintR : paintL,
@@ -2516,7 +2628,7 @@ glob.process_sankey = () => {
   chartEl.style.width = `${approvedCfg.size_w}px`;
 
   // Also update the PNG download buttons' title text with these dimensions:
-  [1, 2, 4, 6].forEach((s) => {
+  [1, 2, 4, 6].forEach(s => {
     el(`save_as_png_${s}x`).title
       = `PNG image file: ${approvedCfg.size_w * s} x ${approvedCfg.size_h * s}`;
   });
@@ -2529,17 +2641,17 @@ glob.process_sankey = () => {
   const updatedSourceLines = origSourceLines
     .map((l, i) => (
       linesWithValidSettings.has(i) ? `${settingsAppliedPrefix}${l}` : l
-      ));
+    ));
 
   // Having processed all the lines now -- if the current inputs came from a
   // file or from a URL, we can clean out all the auto-generated stuff,
   // leaving just the user's inputs:
-  if (glob.newInputsImportedFrom) {
+  if (globalThis.newInputsImportedFrom) {
     // Drop all the auto-generated content and all successful settings:
     el(userInputsField).value = removeAutoLines(updatedSourceLines);
     // Also, leave them a note confirming where the inputs came from.
-    msg.add(`Imported diagram from ${glob.newInputsImportedFrom}`);
-    glob.newInputsImportedFrom = null;
+    msg.add(`Imported diagram from ${globalThis.newInputsImportedFrom}`);
+    globalThis.newInputsImportedFrom = null;
   } else {
     el(userInputsField).value = updatedSourceLines.join('\n');
   }
@@ -2550,7 +2662,7 @@ glob.process_sankey = () => {
     msg.add(
       'Enter a list of Flows &mdash; one per line. '
       + 'See the <a href="/manual/" target="_blank">Manual</a> for more help.'
-      );
+    );
 
     // Clear the contents of the graph in case there was an old graph left
     // over:
@@ -2579,8 +2691,8 @@ glob.process_sankey = () => {
   if (approvedCfg.layout_reversegraph) {
     // Only two of the possible values require any change:
     switch (approvedCfg.flow_inheritfrom) {
-      case 'source': approvedCfg.flow_inheritfrom = 'target'; break;
-      case 'target': approvedCfg.flow_inheritfrom = 'source'; break;
+    case 'source': approvedCfg.flow_inheritfrom = 'target'; break;
+    case 'target': approvedCfg.flow_inheritfrom = 'source'; break;
       // no default
     }
   }
@@ -2591,22 +2703,26 @@ glob.process_sankey = () => {
   // MARK Post-Render Activity - various stats & message updates.
 
   // withUnits: Format a value with the current style.
-  function withUnits(n) { return formatUserData(n, numberStyle); }
+  function withUnits(n) {
+    return formatUserData(n, numberStyle);
+  }
 
   // explainSum: Returns an html string showing the flow amounts which
   // add up to a node's total value in or out.
   function explainSum(n, dir) {
     const formattedSum = withUnits(n.total[dir]),
-      flowGroup = n.flows[dir].filter((f) => !f.isAShadow),
+      flowGroup = n.flows[dir].filter(f => !f.isAShadow),
       flowCt = flowGroup.length;
-    if (flowCt === 1) { return formattedSum; }
+    if (flowCt === 1) {
+      return formattedSum;
+    }
 
     // When there are multiple amounts, the amount appears as a hover
     // target with a tooltip showing the breakdown in descending order.
-    const breakdown = flowGroup.map((f) => f.value)
-        .sort((a, b) => b - a)
-        .map((v) => withUnits(v))
-        .join(' + ');
+    const breakdown = flowGroup.map(f => f.value)
+      .sort((a, b) => b - a)
+      .map(v => withUnits(v))
+      .join(' + ');
     return `<dfn title="${formattedSum} from ${flowCt} `
       + `Flows: ${breakdown}">${formattedSum}</dfn>`;
   }
@@ -2659,9 +2775,9 @@ glob.process_sankey = () => {
   ['meta_listimbalances',
     'layout_attachto_leading',
     'layout_attachto_trailing',
-    'layout_attachto_nearest'].forEach((id) => {
-      el(id).disabled = disableDifferenceControls;
-     });
+    'layout_attachto_nearest'].forEach(id => {
+    el(id).disabled = disableDifferenceControls;
+  });
   el('imbalances_area').setAttribute(
     'aria-disabled',
     disableDifferenceControls.toString()
@@ -2674,7 +2790,7 @@ glob.process_sankey = () => {
       '<tr><td></td><th>Total In</th><th>Total Out</th><th>Difference</th></tr>',
     ];
     // Make a nice table of the differences:
-    differences.forEach((diffRec) => {
+    differences.forEach(diffRec => {
       differenceRows.push(
         `<tr><td class="nodename">${escapeHTML(diffRec.name)}</td>`
         + `<td>${diffRec.total[IN]}</td>`
@@ -2733,23 +2849,4 @@ glob.process_sankey = () => {
 };
 
 // Debounced version of process_sankey as event handler for keystrokes:
-glob.debounced_process_sankey = debounce(glob.process_sankey);
-
-// Load a diagram definition from the URL if there was one:
-loadFromQueryString();
-// Render the present inputs:
-glob.process_sankey();
-}(typeof window === 'undefined' ? global : window));
-
-// Make the linter happy about imported objects:
-/* global
- d3 canvg global IN OUT BEFORE AFTER MAXBREAKPOINT SYM_USE_REMAINDER SYM_FILL_MISSING
- sampleDiagramRecipes fontMetrics highlightStyles
- settingsMarker settingsAppliedPrefix settingsToBackfill
- userDataMarker sourceHeaderPrefix sourceURLLine
- skmSettings colorGray60 userInputsField breakpointField
- reWholeNumber reHalfNumber reInteger reDecimal reYesNo reYes
- reCommentLine reSettingsValue reSettingsText reNodeLine
- reMoveLine movesMarker
- reFlowTargetWithSuffix reColorPlusOpacity
- reBareColor reRGBColor LZString */
+globalThis.debounced_process_sankey = debounce(globalThis.process_sankey);

@@ -1,3 +1,4 @@
 build/canvg/
 build/d3/
 build/working/
+node_modules
