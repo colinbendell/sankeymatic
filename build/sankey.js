@@ -1,5 +1,4 @@
 import { IN, OUT } from './constants.js';
-import * as d3 from 'd3';
 
 // Set up some handy constants (acting as enums)
 // These numbers are relatively prime so each cross-product is unique
@@ -95,7 +94,7 @@ export class Sankey {
 
   // valueSum: Add up all the 'value' keys from a list of objects:
   valueSum(list) {
-    return d3.sum(list, d => d.value);
+    return this.arraySum(list.map(b => b?.value || 0));
   }
 
   // divide: Substitute MIN_VALUE if a denominator would be 0:
@@ -133,10 +132,22 @@ export class Sankey {
 
   // Get the extreme bounds across a list of Nodes:
   leastY(nodeList) {
-    return d3.min(nodeList, n => n.y);
+    return this.arrayMin(nodeList.map(n => n?.y));
   }
   greatestY(nodeList) {
-    return d3.max(nodeList, n => this.yBottom(n));
+    return this.arrayMax(nodeList.map(n => this.yBottom(n)));
+  }
+
+  arrayMin(list, defaultValue = Number.MAX_VALUE) {
+    return list.filter(Number).reduce((a, b) => Math.min(a, b), defaultValue);
+  }
+
+  arrayMax(list, defaultValue = Number.MIN_VALUE) {
+    return list.filter(Number).reduce((a, b) => Math.max(a, b), defaultValue);
+  }
+
+  arraySum(list) {
+    return list.reduce((a, b) => a + (+b || 0), 0);
   }
 
   // Sorting functions:
@@ -205,14 +216,14 @@ export class Sankey {
     }
 
     return {
-      value: d3.sum(flowList, f => f.weightedValue),
+      value: this.arraySum(flowList.map(f => f.weightedValue)),
       sources: {
-        weight: d3.sum(flowList, f => this.sourceCenter(f) * f.weightedValue),
-        maxSourceStage: d3.max(flowList, f => f.source.stage),
+        weight: this.arraySum(flowList.map(f => this.sourceCenter(f) * f.weightedValue)),
+        maxSourceStage: this.arrayMax(flowList.map(f => f.source.stage)),
       },
       targets: {
-        weight: d3.sum(flowList, f => this.targetCenter(f) * f.weightedValue),
-        minTargetStage: d3.min(flowList, f => f.target.stage),
+        weight: this.arraySum(flowList.map(f => this.targetCenter(f) * f.weightedValue)),
+        minTargetStage: this.arrayMin(flowList.map(f => f.target.stage)),
       },
     };
   }
@@ -321,11 +332,10 @@ export class Sankey {
     const flowsRemaining = new Set(flowsToSort.map(f => f.index));
     // Calculate how tall the flow group is which will attach to this
     // node (may be less than n.dy):
-    const totalFlowSpan = d3.sum(
+    const totalFlowSpan = this.arraySum(
       // Only count the space which is needed for visible flows (when
       // the node is real) OR for flows meeting a shadow node:
-      flowsToSort.filter(f => !f.isAShadow || n.isAShadow),
-      f => f.dy
+      flowsToSort.filter(f => !f.isAShadow || n.isAShadow).map(f => f.dy)
     );
     // Attach flows to the *top* of the range, *except* when:
     // the entire node's value is not all flowing somewhere, AND
@@ -456,7 +466,7 @@ export class Sankey {
     nodesWithTargets.sort((a, b) => b.stage - a.stage); // Sort that by stage, descending
     for (const n of nodesWithTargets) {
       // Find n's minimum target stage and use the one right before that:
-      const maxNewStage = d3.min(n.flows[OUT], f => f.target.stage) - 1;
+      const maxNewStage = this.arrayMin(n.flows[OUT].map(f => f.target.stage)) - 1;
       if (n.stage < maxNewStage) {
         n.stage = maxNewStage;
       }
@@ -563,18 +573,18 @@ export class Sankey {
   // This can also be called when nodes' info may have been updated elsewhere
   // & we need a fresh map generated.
   updateStagesArray() {
-    this.#stagesArr = d3.groups(this.#nodes, d => d.stage) // [stage, [nodes]]
+    this.#stagesArr = Object.entries(Object.groupBy(this.#nodes, ({stage}) => stage)) // [stage, [nodes]]
       .sort((a, b) => a[0] - b[0])
-    // Extract each stage and sort its nodes by sourceRow.
-    // (This raises shadow nodes to the same rank the original flow is at)
-      .map(d => d[1].sort(this.bySourceOrder)); // [[nodes]]
+      // Extract each stage and sort its nodes by sourceRow.
+      // (This raises shadow nodes to the same rank the original flow is at)
+      .map(([_stage, nodes]) => nodes.sort(this.bySourceOrder));
   }
 
   // nodeSetStats(nodeList):
   //   Get the total weight+value from an assortment of Nodes.
   //   The Nodes are expected to all be in the same Stage.
   #nodeSetStats(nodeList) {
-    const weight = d3.sum(nodeList, n => this.yCenter(n) * n.value);
+    const weight = this.arraySum(nodeList.map(n => this.yCenter(n) * n.value));
     const value = this.valueSum(nodeList);
     return {
       stage: nodeList[0].stage,
@@ -588,14 +598,14 @@ export class Sankey {
   #initializeNodePositions() {
     // First, calculate the spacing values.
     // How many nodes are in the 'busiest' stage?
-    const greatestNodeCount = d3.max(this.#stagesArr, s => s.length);
+    const greatestNodeCount = this.arrayMax(this.#stagesArr.map(s => s.length));
 
     let ky = 0;
     // Special case: What if there's only one node in every stage?
     // That calculation is very different:
     if (greatestNodeCount === 1) {
       [this.#maximumNodeSpacing, this.#actualNodeSpacing] = [0, 0];
-      ky = this.#nodeHeightFactor * d3.min(this.#stagesArr, s => this.divide(this.#size.h, this.valueSum(s)));
+      ky = this.#nodeHeightFactor * this.arrayMin(this.#stagesArr.map(s => this.divide(this.#size.h, this.valueSum(s))));
     } else {
       // What if each node in the busiest stage got 1 pixel?
       // Figure out how many pixels would be left over.
@@ -610,10 +620,7 @@ export class Sankey {
       this.#actualNodeSpacing = this.#maximumNodeSpacing * this.#nodeSpacingFactor;
       // Finally, calculate the vertical scaling factor for all
       // nodes, given maximumNodeSpacing & the diagram's height:
-      ky = d3.min(
-        this.#stagesArr,
-        s => this.divide(this.#size.h - (s.length - 1) * this.#maximumNodeSpacing, this.valueSum(s))
-      );
+      ky = this.arrayMin(this.#stagesArr.map(s => this.divide(this.#size.h - (s.length - 1) * this.#maximumNodeSpacing, this.valueSum(s))));
     }
     if (ky === Infinity) {
       ky = 1;
@@ -952,6 +959,3 @@ export class Sankey {
     return this;
   };
 };
-
-// Make the linter happy about imported objects:
-/* global d3 IN OUT */
