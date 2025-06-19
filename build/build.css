@@ -43,7 +43,7 @@
 body {
   font-size: small;
   font-family: sans-serif;
-  background-color: #FBFDFD;
+  background-color: #fbfdfd;
   margin: 0;
 }
 
@@ -73,26 +73,7 @@ body {
   grid-template-columns: 1fr fit-content(10ch);
 }
 
-/* Hover effects for slider value display: */
-.fade-init {
-  visibility: hidden;
-  opacity: 0;
-}
-
-.fade-in {
-  visibility: visible;
-  opacity: 1;
-  transition: opacity 0.2s;
-}
-
-.fade-out {
-  visibility: hidden;
-  opacity: 0;
-  transition: visibility 0s 1s, opacity 1s;
-}
-
 /* This is required in order to absolute-position anything inside an element: */
-.output_container { position: relative; }
 
 output {
   position: absolute;
@@ -1137,5 +1118,16 @@ fieldset.simple {
     margin-bottom: 0;
   }
 
-  .footer__nav ul li { margin: 0.3em; }
+
+/* Hover effects for slider value display: */
+.no_wrap:has(input[type="range"]) output {
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0.2s 1s, opacity 0.3s;
+}
+
+.no_wrap:has(input[type="range"]):hover output {
+  visibility: visible;
+  opacity: 1;
+  transition: visibility 0.3s 0s, opacity 0.3s;
 }

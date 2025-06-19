@@ -1,5 +1,3 @@
-import { IN, OUT } from './constants.js';
-
 // Set up some handy constants (acting as enums)
 // These numbers are relatively prime so each cross-product is unique
 // (when we need that)
@@ -9,81 +7,206 @@ const TOP = 5;
 const BOTTOM = 7;
 const NEAREST = 11;
 
+export class Node {
+  #id = "";
+  #name = "";
+  #rawName = "";
+  value = 0;
+  incomingFlows = [];
+  outgoingFlows = [];
+  incomingTotal = 0;
+  outgoingTotal = 0;
+  stage = 0;
+  sourceRow = 0;
+  y = 0;
+  dy = 0;
+  x = 0;
+  dx = 0;
+  paintIncoming = false;
+  paintOutgoing = false;
+  color = null;
+  opacity = null;
+
+  constructor(name, sourceRow = 0, stage = 0, value = 0) {
+    this.#rawName = name;
+    this.#name = name.replace(/^-(.*)-$/, '$1').replaceAll('\\n', ' ').toLowerCase().trim();
+    this.sourceRow = sourceRow;
+    this.stage = stage;
+    this.value = value;
+    this.#id = `n_${name.replaceAll(/[^a-zA-Z0-9]+/g, '_')}`;
+  }
+  get id() {
+    return this.#id;
+  }
+
+  get name() {
+    return this.#name;
+  }
+
+  get rawName() {
+    return this.#rawName;
+  }
+
+  // yCenter & yBottom: Y-position of the middle and end of a node.
+  get yCenter() {
+    return this.y + this.dy / 2;
+  }
+
+  get yBottom() {
+    return this.y + this.dy;
+  }
+}
+
+export class ShadowNode extends Node {
+  constructor(name, sourceRow = 0, stage = 0, value = 0) {
+    super(name, sourceRow, stage, value);
+  }
+}
+
+export class Flow {
+  #id = "";
+  hovering = false;
+  index = 0;
+  sy = 0;
+  ty = 0;
+  dy = 0;
+  dx = 0;
+
+  constructor(source, target, value = 0, sourceRow = 0, color = null, opacity = null) {
+    this.source = source;
+    this.target = target;
+    this.value = value;
+    this.sourceRow = sourceRow;
+    this.color = color;
+    this.opacity = opacity;
+    this.#id = `flow_${source.id}_${target.id}_s${sourceRow}`;
+
+    source.outgoingFlows.push(this);
+    target.incomingFlows.push(this);
+  }
+
+  get id() {
+    return this.#id;
+  }
+
+  get hasAShadow() {
+    return (this.target.stage - this.source.stage > 1);
+  }
+
+  get useForVisiblePlacing() {
+    return !this.hasAShadow;
+  }
+
+  // source___/target___: return the ___ of one end of a flow:
+  get sourceTop() {
+    return this.source.y + this.sy;
+  }
+  get targetTop() {
+    return this.target.y + this.ty;
+  }
+  get sourceCenter() {
+    return this.source.y + this.sy + (this.dy / 2);
+  }
+  get targetCenter() {
+    return this.target.y + this.ty + (this.dy / 2);
+  }
+  get sourceBottom() {
+    return this.source.y + this.sy + this.dy;
+  }
+  get targetBottom() {
+    return this.target.y + this.ty + this.dy;
+  }
+}
+
+export class ShadowFlow extends Flow {
+  constructor(source, target, originalFlow) {
+    super(source, target, originalFlow.value, originalFlow.sourceRow, originalFlow.color, originalFlow.opacity);
+    this.shadowOf = originalFlow;
+    // this.hasAShadow = false;
+    // Make artificial sourceRow numbers so these get prioritized
+    // *with* the original flow:
+    this.sourceRow += Math.abs(originalFlow.source.stage - target.stage) / (Math.abs(originalFlow.source.stage - originalFlow.target.stage) + 1);
+  }
+
+  get useForVisiblePlacing() {
+    // Should we propagate this shadow's y position to the original
+    // flow? Only at the ends of the shadow path.
+    return this.source.stage === this.shadowOf.source.stage || this.target.stage === this.shadowOf.target.stage;
+  }
+
+  get hasAShadow() {
+    return false;
+  }
+}
+
+
 export class Sankey {
-  constructor(nodes, flows, rightJustifyEndpoints, leftJustifyOrigins) {
+  constructor(nodes = [], flows = [], config = {}) {
     this.#nodes = nodes;
     this.#flows = flows;
-    this.#rightJustifyEndpoints = rightJustifyEndpoints;
-    this.#leftJustifyOrigins = leftJustifyOrigins;
+    this.#config = config;
+    const width = config.size_w - config.margin_l - config.margin_r || 100;
+    const height = config.size_h - config.margin_t - config.margin_b || 100;
+    this.#size = { w: width, h: height };
     this.setup();
   }
 
   // Set by inputs:
-  #nodeWidth = 9;
-  #nodeHeightFactor = 0.5;
-  #nodeSpacingFactor = 0.85;
-  #size = { w: 1, h: 1 };
   #nodes = [];
   #flows = [];
-  #rightJustifyEndpoints = false;
-  #leftJustifyOrigins = false;
-  #autoLayout = true;
-  #attachIncompletesTo = NEAREST;
+  #config = {};
+  #size = { w: 100, h: 100 };
   // Calculated:
   #stagesArr = [];
   #maximumNodeSpacing = 0;
   #actualNodeSpacing = 0;
   #maxStage = -1;
 
-  // ACCESSORS //
+  get #rightJustifyEndpoints() {
+    return this.#config.layout_justifyends || false;
+  }
 
-  nodeWidth(x) {
-    if (arguments.length) {
-      this.#nodeWidth = +x; return this;
-    }
-    return this.#nodeWidth;
-  };
+  get #leftJustifyOrigins() {
+    return this.#config.layout_justifyorigins || false;
+  }
 
-  nodeHeightFactor(x) {
-    if (arguments.length) {
-      this.#nodeHeightFactor = +x; return this;
-    }
-    return this.#nodeHeightFactor;
-  };
+  get #nodeWidth() {
+    return this.#config.node_w || 9;
+  }
 
-  nodeSpacingFactor(x) {
-    if (arguments.length) {
-      this.#nodeSpacingFactor = +x; return this;
-    }
-    return this.#nodeSpacingFactor;
-  };
+  get #nodeHeightFactor() {
+    return this.#config.node_h / 100 || 0.5;
+  }
 
-  size(x) {
-    if (arguments.length) {
-      this.#size = x; return this;
-    }
-    return this.#size;
-  };
+  get #nodeSpacingFactor() {
+    return this.#config.node_spacing / 100 || 0.85;
+  }
 
-  autoLayout(x) {
-    if (arguments.length) {
-      this.#autoLayout = x; return this;
-    }
-    return this.#autoLayout;
-  };
+  get #autoLayout() {
+    return this.#config.layout_order === 'automatic' || false;
+  }
 
-  attachIncompletesTo(x) {
-    if (arguments.length) {
-      switch (x.toLowerCase()) {
-      case 'leading': this.#attachIncompletesTo = TOP; break;
-      case 'trailing': this.#attachIncompletesTo = BOTTOM; break;
-      case 'nearest': this.#attachIncompletesTo = NEAREST; break;
-        // no default
-      }
-      return this;
+  get #attachIncompletesTo() {
+    switch (this.#config.layout_attachincompletesto) {
+      case 'leading': return TOP;
+      case 'trailing': return BOTTOM;
+      case 'nearest': return NEAREST;
+      default: return NEAREST;
     }
-    return this.#attachIncompletesTo;
-  };
+  }
+
+  get #iterations() {
+    return this.#config.internal_iterations || 7;
+  }
+
+  /**
+   * @param {{ w: number, h: number }} size
+   * @returns {Sankey}
+   */
+  set size({ w, h }) {
+    this.#size = { w: w || 100, h: h || 100 };
+    return this;
+  }
 
   // Getters:
   stages() {
@@ -102,40 +225,12 @@ export class Sankey {
     return a / (b || Number.MIN_VALUE);
   }
 
-  // yCenter & yBottom: Y-position of the middle and end of a node.
-  yCenter(n) {
-    return n.y + n.dy / 2;
-  }
-  yBottom(n) {
-    return n.y + n.dy;
-  }
-
-  // source___/target___: return the ___ of one end of a flow:
-  sourceTop(f) {
-    return f.source.y + f.sy;
-  }
-  targetTop(f) {
-    return f.target.y + f.ty;
-  }
-  sourceCenter(f) {
-    return f.source.y + f.sy + (f.dy / 2);
-  }
-  targetCenter(f) {
-    return f.target.y + f.ty + (f.dy / 2);
-  }
-  sourceBottom(f) {
-    return f.source.y + f.sy + f.dy;
-  }
-  targetBottom(f) {
-    return f.target.y + f.ty + f.dy;
-  }
-
   // Get the extreme bounds across a list of Nodes:
   leastY(nodeList) {
     return this.arrayMin(nodeList.map(n => n?.y));
   }
   greatestY(nodeList) {
-    return this.arrayMax(nodeList.map(n => this.yBottom(n)));
+    return this.arrayMax(nodeList.map(n => n.yBottom));
   }
 
   arrayMin(list, defaultValue = Number.MAX_VALUE) {
@@ -154,62 +249,20 @@ export class Sankey {
   bySourceOrder(a, b) {
     return a.sourceRow - b.sourceRow;
   }
+  // Sorting functions:
+  byValue(a, b) {
+    return (b.value || 0) - (a.value || 0);
+  }
+
   byTopEdges(a, b) {
     return a.y - b.y;
   }
 
-  // connectFlowsToNodes: Populate flows in & out for each node.
-  connectFlowsToNodes() {
-    // Initialize the flow buckets:
-    for (const n of this.#nodes) {
-      // Lists of flows which use this node as their target or source:
-      n.flows = { [IN]: [], [OUT]: [] };
-      // Mark these as real nodes we want to see:
-      n.isAShadow = false;
-    }
-
-    // Connect each flow to its two nodes:
-    for (const f of this.#flows) {
-      // When the source or target is a number, that's an index;
-      // convert it to the referenced object:
-      if (typeof f.source === 'number') {
-        f.source = this.#nodes[f.source];
-      }
-      if (typeof f.target === 'number') {
-        f.target = this.#nodes[f.target];
-      }
-
-      // Add this flow to the affected source & target:
-      f.source.flows[OUT].push(f);
-      f.target.flows[IN].push(f);
-      // By default, real flows are used when sorting/placing within a node.
-      f.useForVisiblePlacing = true;
-      // Mark these as real flows we want to see:
-      f.isAShadow = false;
-      f.hasAShadow = false;
-    }
-  }
-
-  // computeNodeValues: Compute the value of each node by summing the
-  // associated flows:
-  computeNodeValues() {
-    for (const n of this.#nodes) {
-      // Remember the totals in & out:
-      n.total = { [IN]: this.valueSum(n.flows[IN]), [OUT]: this.valueSum(n.flows[OUT]) };
-      // Each node's value will be the greater of the two (or else the
-      // smallest positive value):
-      n.value = Math.max(n.total[IN], n.total[OUT], Number.MIN_VALUE);
-    }
-  }
-
   // flowSetStats: get the total weight+value from a group of flows
-  #flowSetStats(nodeList, whichFlows) {
+  #flowSetStats(flows) {
     // Get every flow touching one side & treat them as one list:
-    const flowList = nodeList
-      .map(n => n.flows[whichFlows])
-      .flat()
-      // Use the weighted value of a flow (this handles shadows):
-      .filter(f => f.weightedValue > 0);
+    // Use the weighted value of a flow (this handles shadows):
+    const flowList = flows.filter(f => f.weightedValue > 0);
     // If 0 flows, return enough structure to satisfy the caller:
     if (flowList.length === 0) {
       return { value: 0, sources: { weight: 0 }, targets: { weight: 0 } };
@@ -218,11 +271,11 @@ export class Sankey {
     return {
       value: this.arraySum(flowList.map(f => f.weightedValue)),
       sources: {
-        weight: this.arraySum(flowList.map(f => this.sourceCenter(f) * f.weightedValue)),
+        weight: this.arraySum(flowList.map(f => f.sourceCenter * f.weightedValue)),
         maxSourceStage: this.arrayMax(flowList.map(f => f.source.stage)),
       },
       targets: {
-        weight: this.arraySum(flowList.map(f => this.targetCenter(f) * f.weightedValue)),
+        weight: this.arraySum(flowList.map(f => f.targetCenter * f.weightedValue)),
         minTargetStage: this.arrayMin(flowList.map(f => f.target.stage)),
       },
     };
@@ -231,38 +284,40 @@ export class Sankey {
   // weighted-center calculations. These are used to decide where a
   // group of nodes would ideally 'want' to be.
   allFlowStats(nodeList) {
+    const incomingFlows = this.#flowSetStats(nodeList.flatMap(n => n.incomingFlows));
+    const outgoingFlows = this.#flowSetStats(nodeList.flatMap(n => n.outgoingFlows));
+
     // Return the stats for the set of all flows touching these nodes:
-    return { [IN]: this.#flowSetStats(nodeList, IN), [OUT]: this.#flowSetStats(nodeList, OUT) };
+    return { incomingFlows, outgoingFlows };
   }
 
   // placeFlowAt(edge, fIndex):
   //   Update the bound, set this flow's offset, update the queue.
-  #placeFlowAt(placing, bounds, edge, fIndex, flowsRemaining, parentNode) {
-    const f = this.#flows[fIndex];
+  #placeFlowAt(placing, bounds, edge, currFlow, flowsRemaining, parentNode) {
     let newY = 0;
     if (edge === TOP) {
       newY = bounds.upper;
       // If this is real, move the upper bound DOWN.
-      if (f.useForVisiblePlacing || parentNode.isAShadow) {
-        bounds.upper += f.dy;
+      if (currFlow.useForVisiblePlacing || parentNode instanceof ShadowNode) {
+        bounds.upper += currFlow.dy;
       }
     } else { // edge === BOTTOM
       // Make room at the bottom of the range for this flow:
-      newY = bounds.lower - f.dy;
+      newY = bounds.lower - currFlow.dy;
       // If this is real, move the lower bound UP to match:
-      if (f.useForVisiblePlacing || parentNode.isAShadow) {
+      if (currFlow.useForVisiblePlacing || parentNode instanceof ShadowNode) {
         bounds.lower = newY;
       }
     }
 
     // Put the flow where we just decided & drop it from the queue:
-    this.#placeFlow(placing, f, newY, flowsRemaining);
+    this.#placeFlow(placing, currFlow, newY, flowsRemaining);
 
-    if (f.useForVisiblePlacing && f.isAShadow) {
+    if (currFlow.useForVisiblePlacing && currFlow instanceof ShadowFlow) {
       // If this flow should be used for placing a real one AND is a
       // shadow flow, then copy its new position to the true flow & drop
       // that other flow from the queue too:
-      this.#placeFlow(placing, this.#flows[f.shadowOf], newY, flowsRemaining);
+      this.#placeFlow(placing, currFlow.shadowOf, newY, flowsRemaining);
     }
   }
 
@@ -271,50 +326,45 @@ export class Sankey {
   //   edge = TOP or BOTTOM
   #placeUnhappiestFlowAt(slopeData, placing, bounds, edge, flowsRemaining, parentNode) {
     // The queue may have been drained early. Guard against that:
-    if (!flowsRemaining.size) {
+    if (!flowsRemaining.length) {
       return;
     }
-    const sKey = edge * placing,
-      slopeOf = slopeData[sKey].f,
-      // flowIndex = the ID of the unhappiest flow
-      flowIndex = Array.from(flowsRemaining)
+    const sKey = edge * placing;
+    const slopeOf = slopeData[sKey].f;
+    // For autolayout, use the right slopes in the correct order (asc/dsc):
+    // If there is a tie, sort by x-distance (ascending):
+    const autoFlowSort = (a, b) => (slopeData[sKey].dir * (slopeOf(a) - slopeOf(b)) || a.dx - b.dx);
+    const nextFlows = flowsRemaining
       // Exclude flows with shadows; they'll get their position
       // assigned when their shadow gets placed:
-        .filter(i => !this.#flows[i].hasAShadow)
-        .sort((a, b) => (
-        // For autolayout, use the right slopes in the correct order (asc/dsc):
-          this.#autoLayout
-            ? (slopeData[sKey].dir * (slopeOf(this.#flows[a]) - slopeOf(this.#flows[b]))
-              // If there is a tie, sort by x-distance (ascending):
-              || this.#flows[a].dx - this.#flows[b].dx)
-            : 0)
-          // If we are using exact order (OR if there is still a tie),
-          // sort by sourceRow (which is also set for shadow flows)
-          || this.#flows[a].sourceRow - this.#flows[b].sourceRow)[0];
+        .filter(flow => !flow.hasShadow)
+        // If we are using exact order (OR if there is still a tie),
+        // sort by sourceRow (which is also set for shadow flows)
+        .sort((a, b) => (this.#autoLayout ? autoFlowSort(a, b) : 0) || a.sourceRow - b.sourceRow);
     // If we found a flow, place it at the correct edge:
-    if (flowIndex !== undefined) {
-      this.#placeFlowAt(placing, bounds, edge, flowIndex, flowsRemaining, parentNode);
+    if (nextFlows.length) {
+      this.#placeFlowAt(placing, bounds, edge, nextFlows[0], flowsRemaining, parentNode);
     }
   }
 
   // placeFlow(f, y): Update a flow's position
-  #placeFlow(placing, f, newTopY, flowsRemaining) {
+  #placeFlow(placing, currFlow, newTopY, flowsRemaining) {
     // Is the flow actually in the queue? Exit if not. (This can happen
     // when we're placing a shadow flow and offer to update the original
     // flow's Y, but it's in some other stage.)
-    if (!flowsRemaining.has(f.index)) {
+    if (!flowsRemaining.includes(currFlow)) {
       return;
     }
     // sy & ty (source/target y) are the vertical *offsets* at each end
     // of a flow, determining where below the node's top edge the flow's
     // top will meet.
     if (placing === TARGETS) {
-      f.ty = newTopY - f.target.y;
+      currFlow.ty = newTopY - currFlow.target.y;
     } else {
-      f.sy = newTopY - f.source.y;
+      currFlow.sy = newTopY - currFlow.source.y;
     }
     // Drop the flow we just placed from the queue:
-    flowsRemaining.delete(f.index);
+    flowsRemaining.splice(flowsRemaining.indexOf(currFlow), 1);
   }
 
   // sortFlows(node, placing):
@@ -322,20 +372,20 @@ export class Sankey {
   //   'placing' indicates which end of the flows we're working on here:
   //      - TARGETS = we're placing the targets of n.flows[IN]
   //      - SOURCES = we're placing the sources of n.flows[OUT]
-  #sortFlows(n, placing) {
-    const dir = placing === TARGETS ? IN : OUT
-    const fStats = this.allFlowStats([n]);
-    const flowsToSort = n.flows[dir];
-    const totalFlowValue = n.total[dir];
-    const totalFlowWeight = (dir === IN ? fStats[IN].sources : fStats[OUT].targets).weight;
+  #sortFlows(node, placing) {
+    const {incomingFlows, outgoingFlows} = this.allFlowStats([node]);
+    const flowsToSort = placing === TARGETS ? node.incomingFlows : node.outgoingFlows;
+    const totalFlowValue = placing === TARGETS ? node.incomingTotal : node.outgoingTotal;
+    const totalFlowWeight = (placing === TARGETS ? incomingFlows.sources : outgoingFlows.targets).weight;
     // Make a Set of flow IDs we can delete from as we go:
-    const flowsRemaining = new Set(flowsToSort.map(f => f.index));
+    const flowsRemaining = [...flowsToSort];
     // Calculate how tall the flow group is which will attach to this
     // node (may be less than n.dy):
+    const shadowNode = node instanceof ShadowNode;
     const totalFlowSpan = this.arraySum(
       // Only count the space which is needed for visible flows (when
       // the node is real) OR for flows meeting a shadow node:
-      flowsToSort.filter(f => !f.isAShadow || n.isAShadow).map(f => f.dy)
+      flowsToSort.filter(f => shadowNode || !(f instanceof ShadowFlow)).map(f => f.dy)
     );
     // Attach flows to the *top* of the range, *except* when:
     // the entire node's value is not all flowing somewhere, AND
@@ -344,45 +394,45 @@ export class Sankey {
     //   - the center-of-all-attached-flows is below the node's
     //     own center.
     const flowPosition
-        = totalFlowValue < n.value
+        = totalFlowValue < node.value
           && (this.#attachIncompletesTo === BOTTOM
               || (this.#attachIncompletesTo === NEAREST
-                  && this.divide(totalFlowWeight, totalFlowValue) > this.yCenter(n)))
+                  && this.divide(totalFlowWeight, totalFlowValue) > node.yCenter))
           ? BOTTOM
           : TOP;
     // upper/lower bounds = the range where flows may attach
     const bounds
         = flowPosition === TOP
-          ? { upper: n.y, lower: n.y + totalFlowSpan }
-          : { upper: this.yBottom(n) - totalFlowSpan, lower: this.yBottom(n) };
+          ? { upper: node.y, lower: node.y + totalFlowSpan }
+          : { upper: node.yBottom - totalFlowSpan, lower: node.yBottom };
     // Reminder: In SVG-land, y-axis coordinates are inverted...
     //   "upper" & "lower" are meant visually here, not numerically.
 
     // slopeData keys are the product of an 'edge' & a 'placing' value:
     const slopeData = {
-      [TOP * TARGETS]: { f: f => (bounds.upper - this.sourceTop(f)) / f.dx, dir: -1 },
-      [TOP * SOURCES]: { f: f => (this.targetTop(f) - bounds.upper) / f.dx, dir: 1 },
-      [BOTTOM * TARGETS]: { f: f => (bounds.lower - this.sourceBottom(f)) / f.dx, dir: 1 },
-      [BOTTOM * SOURCES]: { f: f => (this.targetBottom(f) - bounds.lower) / f.dx, dir: -1 },
+      [TOP * TARGETS]: { f: flow => (bounds.upper - flow.sourceTop) / flow.dx, dir: -1 },
+      [TOP * SOURCES]: { f: flow => (flow.targetTop - bounds.upper) / flow.dx, dir: 1 },
+      [BOTTOM * TARGETS]: { f: flow => (bounds.lower - flow.sourceBottom) / flow.dx, dir: 1 },
+      [BOTTOM * SOURCES]: { f: flow => (flow.targetBottom - bounds.lower) / flow.dx, dir: -1 },
     };
 
     // Loop through the flow set, placing them from the outside in.
     // If there are at least 2 flows to be placed, we figure out which is
     // best suited to occupy the top & bottom edge spots.
     // After placing those, the remaining range is reduced & we repeat.
-    while (flowsRemaining.size > 1) {
+    while (flowsRemaining.filter(f => !f.hasAShadow).length > 1) {
       // Place the least fortunate flows, then subtract their size from
       // the available range:
-      this.#placeUnhappiestFlowAt(slopeData, placing, bounds, TOP, flowsRemaining, n);
+      this.#placeUnhappiestFlowAt(slopeData, placing, bounds, TOP, flowsRemaining, node);
       if (this.#autoLayout) {
-        this.#placeUnhappiestFlowAt(slopeData, placing, bounds, BOTTOM, flowsRemaining, n);
+        this.#placeUnhappiestFlowAt(slopeData, placing, bounds, BOTTOM, flowsRemaining, node);
       }
       // (If using exact order, we want to place top->bottom, NOT alternate.)
     }
 
     // After that loop, we have 0-1 flows. If there is one, place it:
-    for (const i of flowsRemaining) {
-      this.#placeFlowAt(placing, bounds, TOP, i, flowsRemaining, n);
+    for (const flow of flowsRemaining) {
+      this.#placeFlowAt(placing, bounds, TOP, flow, flowsRemaining, node);
     }
   }
 
@@ -398,20 +448,20 @@ export class Sankey {
     //    is dragged to the opposite side of a connected node, the ordering
     //    will remain stable.
     // 2) Denominator dx must not be 0, so MIN_VALUE is substituted if needed.
-    for (const f of this.#flows) {
-      f.dx = Math.abs(f.target.x - f.source.x) || Number.MIN_VALUE;
+    for (const flow of this.#flows) {
+      flow.dx = Math.abs(flow.target.x - flow.source.x) || Number.MIN_VALUE;
     }
 
     // Gather all the distinct batches of flows we'll need to process (each
     // node may have 0-2 batches):
     const flowBatches = [
-      ...nodeList.filter(n => n.flows[IN].length)
+      ...nodeList.filter(n => n.incomingFlows.length)
         .map(n => (
-          { i: n.index, len: n.flows[IN].length, placing: TARGETS }
+          { node: n, len: n.incomingFlows.length, placing: TARGETS }
         )),
-      ...nodeList.filter(n => n.flows[OUT].length)
+      ...nodeList.filter(n => n.outgoingFlows.length)
         .map(n => (
-          { i: n.index, len: n.flows[OUT].length, placing: SOURCES }
+          { node: n, len: n.outgoingFlows.length, placing: SOURCES }
         )),
     ];
 
@@ -423,23 +473,14 @@ export class Sankey {
     flowBatches.sort((a, b) => a.len - b.len);
     for (const fBatch of flowBatches) {
       // Finally: Go through every batch & sort its flows anew:
-      this.#sortFlows(this.#nodes[fBatch.i], fBatch.placing);
-    }
-  }
-
-  // Handle layout checkboxes:
-  #setStageWhenNoFlows(direction, newStage) {
-    // For nodes with no flows going {direction}...
-    for (const n of this.#nodes.filter(n => !n.flows[direction].length)) {
-      // ...set their stages to newStage:
-      n.stage = newStage;
+      this.#sortFlows(fBatch.node, fBatch.placing);
     }
   }
 
   // assignNodesToStages: Iteratively assign the stage (x-group) for each node.
   // Nodes are assigned the maximum stage of their incoming neighbors + 1,
   // then any nodes which can be nudged forward are.
-  assignNodesToStages() {
+  #assignNodesToStages() {
     const nodesToCheckAgain = new Set();
 
     // Work from left to right.
@@ -449,10 +490,10 @@ export class Sankey {
     // The maxStage check is to avoid an infinite loop when there is a cycle:
     while (nodesToPlace.length && this.#maxStage < this.#nodes.length - 1) {
       this.#maxStage += 1;
-      for (const n of nodesToPlace) {
-        n.stage = this.#maxStage;
-        for (const f of n.flows[OUT]) {
-          nodesToCheckAgain.add(f.target);
+      for (const node of nodesToPlace) {
+        node.stage = this.#maxStage;
+        for (const flow of node.outgoingFlows) {
+          nodesToCheckAgain.add(flow.target);
         }
       }
 
@@ -462,109 +503,72 @@ export class Sankey {
 
     // Pull any source nodes to the right which have room to move.
     // First, get a COPY of the list of all nodes with targets:
-    const nodesWithTargets = this.#nodes.filter(n => n.flows[OUT].length).slice();
+    const nodesWithTargets = this.#nodes.filter(n => n.outgoingFlows.length).slice();
     nodesWithTargets.sort((a, b) => b.stage - a.stage); // Sort that by stage, descending
-    for (const n of nodesWithTargets) {
+    for (const node of nodesWithTargets) {
       // Find n's minimum target stage and use the one right before that:
-      const maxNewStage = this.arrayMin(n.flows[OUT].map(f => f.target.stage)) - 1;
-      if (n.stage < maxNewStage) {
-        n.stage = maxNewStage;
+      const maxNewStage = this.arrayMin(node.outgoingFlows.map(f => f.target.stage)) - 1;
+      if (node.stage < maxNewStage) {
+        node.stage = maxNewStage;
       }
     }
 
-    // Force origins to appear all the way to the left?
-    if (this.#leftJustifyOrigins) {
-      this.#setStageWhenNoFlows(IN, 0);
-    }
-
-    // Force endpoints all the way to the right?
-    if (this.#rightJustifyEndpoints) {
-      this.#setStageWhenNoFlows(OUT, this.#maxStage);
+    if (this.#leftJustifyOrigins || this.#rightJustifyEndpoints) {
+      for (const node of this.#nodes) {
+        // Force origins to appear all the way to the left?
+        if (this.#leftJustifyOrigins && node.incomingFlows.length === 0) node.stage = 0;
+        // Force endpoints all the way to the right?
+        if (this.#rightJustifyEndpoints && node.outgoingFlows.length === 0) node.stage = this.#maxStage;
+      }
     }
 
     // Now that the main nodes and flows are in place, we also fill in
     // SHADOW nodes & flows to occupy space whenever stages are skipped.
-    // To get started, fill in the 'ds' (stage distance) for all flows:
-    for (const f of this.#flows) {
-      f.ds = f.target.stage - f.source.stage;
-    }
-
-    // Next, operate on flows which cross more than one stage:
     const shadowNodeNames = new Map();
-    for (const f of this.#flows.filter(f => Math.abs(f.ds) > 1)) {
-      const nodesForThisFlow = [f.source];
+    for (const flow of this.#flows) {
+      // Next, operate on flows which cross more than one stage:
+      const stageDistance = flow.target.stage - flow.source.stage;
+      if (Math.abs(stageDistance) <= 1) continue;
+      if (flow instanceof ShadowFlow) continue;
+
       // Duplicate the source node as many times as needed (though only
       // as large as this individual flow)
-      for (let i = 1; i < f.ds; i += 1) {
-        const shadowStage = f.source.stage + i;
+      let sourceNode = flow.source;
+      for (let i = 1; i < stageDistance; i += 1) {
+        const shadowStage = flow.source.stage + i;
         // Create a custom name for the shadow which will still group
         // multiple flows between the same 2 places.
-        const newNodeName = `sh_${f.source.index}_${f.target.index}_s${shadowStage}`;
-        const fVal = Number(f.value);
+        const newNodeName = `(Shadow) ${flow.source.name} : ${flow.target.name} #${shadowStage}`;
 
         let shadowNode;
         // Have we already made a shadow node for this source/target?
         if (shadowNodeNames.has(newNodeName)) {
           // If so, let's add value to the node we've already made:
-          shadowNode = this.#nodes[shadowNodeNames.get(newNodeName)];
-          shadowNode.value += fVal;
-          shadowNode.total[IN] += fVal;
-          shadowNode.total[OUT] += fVal;
+          shadowNode = shadowNodeNames.get(newNodeName);
         } else {
           // A shadow node doesn't exist, so we make a fresh one with the
           // same sourceRow as the original flow:
-          shadowNode = {
-            index: this.#nodes.length,
-            stage: shadowStage,
-            name: newNodeName,
-            sourceRow: f.sourceRow,
-            isAShadow: true,
-            flows: { [IN]: [], [OUT]: [] },
-            total: { [IN]: fVal, [OUT]: fVal },
-            value: fVal,
-          };
+          shadowNode = new ShadowNode(newNodeName, flow.sourceRow, shadowStage);
           // Add this to the big list and to our shadow-tracking list:
           this.#nodes.push(shadowNode);
-          shadowNodeNames.set(newNodeName, shadowNode.index);
+          shadowNodeNames.set(shadowNode.name, shadowNode);
+
+          // Now that we have a list of all nodes along the way, add shadow
+          // flows between each pair (starting from the 2nd item in the list).
+          const newFlow = new ShadowFlow(sourceNode, shadowNode, flow);
+          this.#flows.push(newFlow);
+
+          if (flow.target.stage === shadowStage + 1) {
+            const newFlow = new ShadowFlow(shadowNode, flow.target, flow);
+            this.#flows.push(newFlow);
+          }
         }
-        nodesForThisFlow.push(shadowNode);
+        shadowNode.value += flow.value;
+        shadowNode.incomingTotal += flow.value;
+        shadowNode.outgoingTotal += flow.value;
+
+        sourceNode = shadowNode;
       }
-      nodesForThisFlow.push(f.target);
-
-      // Now that we have a list of all nodes along the way, add shadow
-      // flows between each pair (starting from the 2nd item in the list).
-      for (let i = 1; i < nodesForThisFlow.length; i += 1) {
-        const sourceNode = nodesForThisFlow[i - 1];
-        const targetNode = nodesForThisFlow[i];
-        const origSourceRow = Number(f.sourceRow);
-        // Take values from the original flow, then override some:
-        const newFlow = {
-          ...f,
-          source: sourceNode,
-          target: targetNode,
-          index: this.#flows.length,
-          shadowOf: f.index,
-          isAShadow: true,
-          hasAShadow: false,
-          // Make artificial sourceRow numbers so these get prioritized
-          // *with* the original flow:
-          sourceRow: origSourceRow + i / (f.ds + 1),
-          // Should we propagate this shadow's y position to the original
-          // flow? Only at the ends of the shadow path.
-          useForVisiblePlacing:
-                sourceNode.stage === f.source.stage
-                  || targetNode.stage === f.target.stage,
-        };
-
-        this.#flows.push(newFlow);
-        newFlow.source.flows[OUT].push(newFlow);
-        newFlow.target.flows[IN].push(newFlow);
-      }
-
-      // Now that we're done adopting various values from original flow f,
-      // tell f itself that Things have Changed:
-      f.useForVisiblePlacing = false;
-      f.hasAShadow = true;
     }
   }
 
@@ -572,7 +576,7 @@ export class Sankey {
   // stage's nodes, in stage order.
   // This can also be called when nodes' info may have been updated elsewhere
   // & we need a fresh map generated.
-  updateStagesArray() {
+  #updateStagesArray() {
     this.#stagesArr = Object.entries(Object.groupBy(this.#nodes, ({stage}) => stage)) // [stage, [nodes]]
       .sort((a, b) => a[0] - b[0])
       // Extract each stage and sort its nodes by sourceRow.
@@ -584,7 +588,7 @@ export class Sankey {
   //   Get the total weight+value from an assortment of Nodes.
   //   The Nodes are expected to all be in the same Stage.
   #nodeSetStats(nodeList) {
-    const weight = this.arraySum(nodeList.map(n => this.yCenter(n) * n.value));
+    const weight = this.arraySum(nodeList.map(n => n.yCenter * n.value));
     const value = this.valueSum(nodeList);
     return {
       stage: nodeList[0].stage,
@@ -628,13 +632,13 @@ export class Sankey {
 
     // Compute all the dy & weighted values using the now-known scale
     // of the graph:
-    for (const f of this.#flows) {
-      f.dy = f.value * ky;
-      f.weightedValue = f.hasAShadow ? 0 : f.value;
+    for (const flow of this.#flows) {
+      flow.dy = flow.value * ky;
+      flow.weightedValue = flow.hasAShadow ? 0 : flow.value;
     }
     // Also: Ensure each node has a nonzero height:
-    for (const n of this.#nodes) {
-      n.dy = Math.max(n.value * ky, Number.MIN_VALUE);
+    for (const node of this.#nodes) {
+      node.dy = Math.max(node.value * ky, Number.MIN_VALUE);
     }
 
     // Set the initial positions of all nodes within each stage.
@@ -649,7 +653,7 @@ export class Sankey {
       // chicken/egg problem: We want to use weighted centers based on
       // flows (i.e. flowSetStats), but at this point 0 flows are placed.
       // Simpler approach: use the weighted center of nodes flowing in.
-      const allFlowsIn = s.map(n => n.flows[IN]).flat();
+      const allFlowsIn = s.flatMap(n => n.incomingFlows);
       if (allFlowsIn.length > 0) {
         const uniqueSourceNodes = new Set(
           allFlowsIn.map(f => f.source)
@@ -667,7 +671,7 @@ export class Sankey {
       for (const n of s) {
         n.y = nextNodePos;
         // Find the y position of the next node:
-        nextNodePos = this.yBottom(n) + this.#actualNodeSpacing;
+        nextNodePos = n.yBottom + this.#actualNodeSpacing;
       }
     };
 
@@ -682,25 +686,25 @@ export class Sankey {
     // With nodes placed, we *also* have to provide an initial
     // placement for all flows, so that their weights can be measured
     // realistically in the placeNodes() routine.
-    for (const n of this.#nodes) {
+    for (const node of this.#nodes) {
       // Each flow is initially placed naively, just using the input order.
       // Any misfires will be corrected soon by placeFlowsInsideNodes()
       let [sy, ty] = [0, 0];
       // Shadows touching a real node adopt the same position as their
       // 'true' flow. (NOTE: This works because all shadows initially
       // *follow* all real flows.):
-      for (const f of n.flows[OUT]) {
-        if (f.isAShadow && !n.isAShadow) {
-          f.sy = this.#flows[f.shadowOf].sy;
+      for (const flow of node.outgoingFlows) {
+        if (flow instanceof ShadowFlow && !(node instanceof ShadowNode)) {
+          flow.sy = flow.shadowOf.sy;
         } else {
-          f.sy = sy; sy += f.dy;
+          flow.sy = sy; sy += flow.dy;
         }
       }
-      for (const f of n.flows[IN]) {
-        if (f.isAShadow && !n.isAShadow) {
-          f.ty = this.#flows[f.shadowOf].ty;
+      for (const flow of node.incomingFlows) {
+        if (flow instanceof ShadowFlow && !(node instanceof ShadowNode)) {
+          flow.ty = flow.shadowOf.ty;
         } else {
-          f.ty = ty; ty += f.dy;
+          flow.ty = ty; ty += flow.dy;
         }
       }
     }
@@ -712,9 +716,9 @@ export class Sankey {
   #findNodeGroupOffset(nodeList) {
     // The population of flows to test = the combination of every
     // last flow touching this group of Nodes:
-    const fStats = this.allFlowStats(nodeList);
-    const totalIn = fStats[IN].value;
-    const totalOut = fStats[OUT].value;
+    const {incomingFlows, outgoingFlows} = this.allFlowStats(nodeList);
+    const totalIn = incomingFlows.value;
+    const totalOut = outgoingFlows.value;
     // If there are no flows touching *either* side here, there's nothing
     // to offset ourselves relative to, so we can exit early:
     if (totalIn === 0 && totalOut === 0) {
@@ -730,7 +734,7 @@ export class Sankey {
     // If 100% of the value of the Node group is flowing in, then this is
     // exactly equivalent to: *the weighted center of all sources*.
     const projectedSourceCenter = this.divide(
-      nStats.weight - fStats[IN].targets.weight + fStats[IN].sources.weight,
+      nStats.weight - incomingFlows.targets.weight + incomingFlows.sources.weight,
       nStats.value
     );
 
@@ -739,7 +743,7 @@ export class Sankey {
     //     - outgoing weights' center
     //     + final center of those weights
     const projectedTargetCenter = this.divide(
-      nStats.weight - fStats[OUT].sources.weight + fStats[OUT].targets.weight,
+      nStats.weight - outgoingFlows.sources.weight + outgoingFlows.targets.weight,
       nStats.value
     );
 
@@ -754,8 +758,8 @@ export class Sankey {
       goalY = projectedTargetCenter;
     } else {
       // There are flows both in & out. Find the slope between the centers:
-      const startStage = fStats[IN].sources.maxSourceStage;
-      const endStage = fStats[OUT].targets.minTargetStage;
+      const startStage = incomingFlows.sources.maxSourceStage;
+      const endStage = outgoingFlows.targets.minTargetStage;
       const stageDistance = endStage - startStage;
       const slopeBetweenCenters = stageDistance !== 0 // Avoid divide-by-0 error
         ? (projectedTargetCenter - projectedSourceCenter) / stageDistance
@@ -773,7 +777,7 @@ export class Sankey {
   #nodesAreAdjacent(n1, n2) {
     // Is the bottom of the 1st node + the node spacing essentially
     // the same as the 2nd node's top? (i.e. within a tenth of a 'pixel')
-    return (n2.y - this.#actualNodeSpacing - this.yBottom(n1)) < 0.1;
+    return (n2.y - this.#actualNodeSpacing - n1.yBottom) < 0.1;
   }
 
   // enforceValidNodePositions():
@@ -788,14 +792,14 @@ export class Sankey {
         n.y = yPos;
       }
       // Set yPos to the next available y toward the bottom:
-      yPos = this.yBottom(n) + this.#actualNodeSpacing;
+      yPos = n.yBottom + this.#actualNodeSpacing;
     }
 
     // ... if we've gone *past* the bottom, bump nodes back up.
     yPos = this.#size.h; // = the current available y closest to the bottom
     for (const n of s.slice().reverse()) {
       // if this node's bottom is below yPos, nudge it up:
-      if (this.yBottom(n) > yPos) {
+      if (n.yBottom > yPos) {
         n.y = yPos - n.dy;
       }
       // Set yPos to the next available y toward the top:
@@ -903,7 +907,7 @@ export class Sankey {
   // placeNodes(iterations):
   //   Set (and then adjust) the y-position for each node and flow, based
   //   on their connections to other points in the diagram.
-  placeNodes(iterations) {
+  #placeNodes(iterations) {
     // Enough preamble. Lay out the nodes:
     this.#initializeNodePositions();
     // Resolve all collisions/spacing & place all flows to start:
@@ -935,20 +939,18 @@ export class Sankey {
   // setup() = define the *skeleton* of the diagram -- which nodes link to
   // which, and in which stages -- but no specific positions yet:
   setup() {
-    this.connectFlowsToNodes();
-    this.computeNodeValues();
-    this.assignNodesToStages();
-    this.updateStagesArray();
+    this.#assignNodesToStages();
+    this.#updateStagesArray();
     return this;
   };
 
   // layout() = Given a complete skeleton, use the given total width/height and
   // set the exact positions of all nodes and flows:
-  layout(iterations) {
+  layout() {
     // In case anything's changed since setup, re-generate our map:
-    this.updateStagesArray();
+    this.#updateStagesArray();
     // Iterate over the structure several times to make the layout nice:
-    this.placeNodes(iterations);
+    this.#placeNodes(this.#iterations);
     return this;
   };
 
